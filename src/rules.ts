@@ -56,8 +56,22 @@ export function validateDownloadOptions(options: DownloadOptions): void {
 }
 
 /**
- * Normalizes a folder relative to the download root.
- * Refuses absolute paths and ".." so a subscription cannot write outside it.
+ * A file-system-safe name: accents dropped, then anything but ASCII letters, digits,
+ * "." "_" "-" becomes "_" ("Kurzgesagt – In a Nutshell" -> "Kurzgesagt_In_a_Nutshell").
+ * Keeps paths free of spaces and special characters for shells, Samba and media servers.
+ */
+export function safeName(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9._-]+/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^[._-]+|[._-]+$/g, '');
+}
+
+/**
+ * Normalizes a folder relative to the download root: each level is made safe with
+ * safeName. Refuses absolute paths and ".." so a subscription cannot write outside it.
  */
 export function normalizeFolder(folder: string): string {
   const parts = folder
@@ -65,15 +79,20 @@ export function normalizeFolder(folder: string): string {
     .split('/')
     .map((part) => part.trim())
     .filter((part) => part !== '' && part !== '.');
+  const safe: string[] = [];
   for (const part of parts) {
     if (part === '..') {
       throw new Error('Folder cannot contain ".."');
     }
+    const name = safeName(part);
+    if (name !== '') {
+      safe.push(name);
+    }
   }
-  return parts.join('/');
+  return safe.join('/');
 }
 
 /** Folder name derived from a channel or playlist title. */
 export function folderFromName(name: string): string {
-  return name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'YouTube';
+  return safeName(name) || 'YouTube';
 }

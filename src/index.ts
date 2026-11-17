@@ -26,6 +26,9 @@ function main(): void {
     channel: config.ytdlpChannel,
   });
   const library = new Library(store, config, () => ytdlp.path);
+  for (const change of library.normalizeFolders()) {
+    log(`folder renamed for new downloads: ${change}`);
+  }
 
   let downloader: Downloader;
   if (config.downloader === 'metube') {

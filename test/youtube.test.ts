@@ -8,7 +8,7 @@ import { Store } from '../src/store';
 import { test } from 'node:test';
 import { indexHistory } from '../src/downloaders/metube';
 import { buildYtdlpArgs, ProgressTracker } from '../src/downloaders/ytdlp';
-import { filterReason, normalizeFolder, validateDownloadOptions } from '../src/rules';
+import { filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
 import { parseFeed, parseSourceInput, videoIdFromUrl } from '../src/youtube';
 import { isNewer } from '../src/ytdlpManager';
@@ -102,6 +102,9 @@ test('filterReason applies Shorts and case-insensitive title filters', () => {
 
 test('normalizeFolder trims slashes and refuses parent segments', () => {
   assert.equal(normalizeFolder('/YouTube//Lab/ '), 'YouTube/Lab');
+  assert.equal(normalizeFolder('YouTube/Kurzgesagt – In a Nutshell'), 'YouTube/Kurzgesagt_In_a_Nutshell');
+  assert.equal(normalizeFolder('Été à Paris!/Tom & Jerry\'s (best)'), 'Ete_a_Paris/Tom_Jerry_s_best');
+  assert.equal(folderFromName('★★★'), 'YouTube');
   assert.equal(normalizeFolder('a\\b'), 'a/b');
   assert.throws(() => normalizeFolder('../etc'), /\.\./);
 });
