@@ -1,0 +1,20 @@
+# Youtubaar on its own: it finds new videos and downloads them with the bundled yt-dlp.
+services:
+  youtubaar:
+    build: .
+    image: youtubaar:latest
+    container_name: youtubaar
+    restart: unless-stopped
+    ports:
+      - "8085:8085"
+    environment:
+      DOWNLOADER: ytdlp
+      POLL_INTERVAL_MINUTES: 30
+      YTDLP_CONCURRENCY: 1
+      # AUTH_PASSWORD: change-me    # enables basic auth (user: admin)
+      # To download through an existing MeTube instead:
+      # DOWNLOADER: metube
+      # METUBE_URL: http://<metube-host>:8081
+    volumes:
+      - ./data:/data                # subscriptions and video list
+      - ./downloads:/downloads      # downloaded videos, one folder per subscription

@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Youtubaar</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Ccircle cx='16' cy='16' r='14' fill='none' stroke='%23ff5a5f' stroke-width='4'/%3E%3Cpath d='M13 10.5v11l9-5.5z' fill='%23ff5a5f'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=Instrument+Sans:wght@400..700&display=swap">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#/library" aria-label="Youtubaar home">
+      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true"><circle cx="16" cy="16" r="13" /><path d="M13 10.5v11l9-5.5z" /></svg>
+      <span>Youtubaar</span>
+    </a>
+    <nav class="nav" id="nav" aria-label="Main"></nav>
+    <div class="sidebar-foot" id="sidebar-foot"></div>
+  </aside>
+
+  <div class="main">
+    <header class="topbar">
+      <label class="search">
+        <span class="search-icon" data-icon="search"></span>
+        <input id="search" type="search" placeholder="Search videos and channels" autocomplete="off">
+      </label>
+      <div class="topbar-actions">
+        <span id="poll-status" class="poll-status"></span>
+        <button id="add-button" class="button primary"><span data-icon="plus"></span><span>Add channel</span></button>
+      </div>
+    </header>
+    <main id="page" class="page" tabindex="-1"></main>
+  </div>
+
+  <dialog id="dialog" class="dialog"></dialog>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>
