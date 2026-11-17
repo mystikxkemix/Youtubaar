@@ -15,9 +15,13 @@ YouTube RSS feeds ──poll──▶ Youtubaar ──"download this"──▶ y
 
 - **Channels and playlists**: paste a channel URL, an `@handle`, a `/channel/UC…` URL,
   a playlist URL (`…/playlist?list=PL…`) or a raw channel/playlist id.
+- **Playlists come first**: a video listed by both a channel and one of its followed
+  playlists belongs to the playlist (its folder, its Jellyfin show) as long as you have
+  not acted on it yet. Playlists are listed whole with yt-dlp, because YouTube's
+  playlist feed only shows the first 15 videos and new episodes are usually appended.
 - **A channel's playlists**: when adding a channel (or later, from its page with
   *Playlists*), list its public playlists and follow any of them, each with its own
-  *Auto-download* switch. Playlists save into `<channel folder>/<playlist name>`.
+  *Auto-download* switch. Playlists save into `<channel folder>_<playlist name>`, next to the channel.
   If you pick from the channel but a playlist auto-downloads, a new video in that
   playlist is downloaded even when the channel found it first.
 - **Pick or auto per subscription**: *Let me pick* puts new videos in the Inbox,
@@ -109,7 +113,13 @@ upload year a season, each video an episode.
    so Jellyfin does not try to match YouTube channels against TV databases.
 3. New downloads appear after Jellyfin's next scan (or *Scan library*).
 
-Episodes are numbered by date (`111701` = 17 Nov, first video that day), so they sort
+**Playlists are separate shows.** A followed playlist gets its own folder next to the
+channel's (`mistermv` and `mistermv_ZELDA_OCARINA_OF_TIME`), a single `Season_01`, and
+episodes numbered by their place in the playlist, so a let's play reads 1, 2, 3...
+A Jellyfin show folder cannot sit inside another subscription's folder (it would read
+as a season), and Youtubaar refuses that setup.
+
+For channels, episodes are numbered by date (`111701` = 17 Nov, first video that day), so they sort
 in upload order. Videos downloaded before turning the option on keep their old place.
 It needs the built-in yt-dlp downloader (MeTube saves files its own way) and applies
 to video downloads only.

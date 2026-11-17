@@ -4,7 +4,7 @@ import type { Downloader, DownloadUpdate } from './downloaders/types';
 import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from './rules';
 import type { Store } from './store';
 import type { DownloadType, InitialAction, Mode, Subscription, Video, VideoStatus } from './types';
-import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
+import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
 
 export interface SubscriptionInput {
   url?: string;
@@ -198,7 +198,9 @@ export class Library {
       avatar,
       ownerChannelId: ref.kind === 'playlist' ? feed.ownerChannelId : ref.sourceId,
       ownerName: ref.kind === 'playlist' ? feed.ownerName : name,
-      folder: normalizeFolder(input.folder?.trim() || folderFromName(name)),
+      // A playlist is its own show, so its default folder sits next to the channel's,
+      // never inside it: "mistermv_Zelda_Ocarina_of_Time".
+      folder: normalizeFolder(input.folder?.trim() || folderFromName(ref.kind === 'playlist' && feed.ownerName ? `${feed.ownerName}_${name}` : name)),
       mode: input.mode ?? 'manual',
       downloadType: input.downloadType ?? 'video',
       format: input.format ?? 'any',
@@ -214,7 +216,10 @@ export class Library {
     };
     this.validate(subscription);
     this.subscriptions.push(subscription);
-    const added = this.ingest(subscription, feed.entries, input.initial ?? 'available');
+    let added = this.ingest(subscription, feed.entries, input.initial ?? 'available');
+    if (subscription.kind === 'playlist') {
+      added += await this.listWholePlaylist(subscription, feed.entries);
+    }
     this.store.save();
     return { subscription, added };
   }
@@ -259,7 +264,10 @@ export class Library {
     let added = 0;
     try {
       const feed = await fetchFeed(subscription);
-      added = this.ingest(subscription, feed.entries, 'follow-mode');
+      if (subscription.kind === 'playlist' && !subscription.fullyListed) {
+        added += await this.listWholePlaylist(subscription, feed.entries);
+      }
+      added += this.ingest(subscription, await this.playlistAware(subscription, feed.entries), 'follow-mode');
       if (subscription.avatar === undefined) {
         // Subscriptions created before avatars existed get theirs on the next check.
         subscription.avatar = await fetchAvatar(subscription);
@@ -501,23 +509,69 @@ export class Library {
     if (subscription.jellyfin === true && subscription.downloadType !== 'video') {
       throw new Error('The Jellyfin layout is for video downloads; turn it off for audio');
     }
+    // A Jellyfin show folder inside another subscription's folder would read as a season.
+    for (const other of this.subscriptions) {
+      if (other.id === subscription.id || !(subscription.jellyfin || other.jellyfin)) {
+        continue;
+      }
+      const inside = (a: string, b: string): boolean => a === b || a.startsWith(`${b}/`);
+      if (inside(subscription.folder, other.folder) || inside(other.folder, subscription.folder)) {
+        throw new Error(`With Jellyfin metadata, "${subscription.folder}" cannot share or sit inside "${other.folder}" (${other.name}); pick a folder next to it`);
+      }
+    }
     if (subscription.mode !== 'auto' && subscription.mode !== 'manual') {
       throw new Error('Mode must be "auto" or "manual"');
     }
   }
 
   /**
-   * A video found first through a subscription where you pick (e.g. the whole channel)
-   * is handed to an auto-downloading subscription that also lists it (e.g. one of the
-   * channel's playlists), unless you already decided about it. Videos you ignored
-   * yourself stay ignored; videos only skipped by the other subscription's filters do not.
+   * A video listed by two subscriptions belongs to the first that found it, but changes
+   * hands while you have not decided about it yet:
+   * - to a playlist, when the current owner is a channel: the more specific source wins,
+   *   so a let's play lands in its own show and folder;
+   * - to a subscription that auto-downloads, which then queues it.
+   * Videos you ignored yourself stay ignored; videos only skipped by the other
+   * subscription's filters do not.
    */
-  private canClaim(video: Video, subscription: Subscription, entry: FeedEntry): boolean {
-    if (video.subscriptionId === subscription.id || subscription.mode !== 'auto' || !subscription.enabled) {
+  private canClaim(video: Video, subscription: Subscription, entry: FeedEntry, autoDownloads: boolean): boolean {
+    const undecided = video.status === 'available' || (video.status === 'ignored' && video.note !== null);
+    if (!undecided || filterReason(subscription, entry) !== null) {
       return false;
     }
-    const undecided = video.status === 'available' || (video.status === 'ignored' && video.note !== null);
-    return undecided && filterReason(subscription, entry) === null;
+    const owner = this.subscriptions.find((candidate) => candidate.id === video.subscriptionId);
+    const moreSpecific = subscription.kind === 'playlist' && owner?.kind !== 'playlist';
+    return moreSpecific || autoDownloads;
+  }
+
+  /**
+   * For playlists, the whole listing (new videos are often appended past the feed's 15).
+   * Falls back to the feed when yt-dlp cannot list it.
+   */
+  private async playlistAware(subscription: Subscription, feedEntries: FeedEntry[]): Promise<FeedEntry[]> {
+    if (subscription.kind !== 'playlist') {
+      return feedEntries;
+    }
+    try {
+      const listing = await fetchBacklog(subscription, this.ytdlpPath(), this.config.backlogLimit);
+      return mergeListing(listing.entries, feedEntries);
+    } catch {
+      return feedEntries;
+    }
+  }
+
+  /**
+   * First full listing of a playlist: what is already in it is shown as new, never
+   * downloaded automatically, so following a long playlist does not grab its backlog.
+   */
+  private async listWholePlaylist(subscription: Subscription, feedEntries: FeedEntry[]): Promise<number> {
+    try {
+      const listing = await fetchBacklog(subscription, this.ytdlpPath(), this.config.backlogLimit);
+      const added = this.ingest(subscription, mergeListing(listing.entries, feedEntries), 'available');
+      subscription.fullyListed = true;
+      return added;
+    } catch {
+      return 0;
+    }
   }
 
   /** Files entries not seen before; returns how many were new. */
@@ -527,9 +581,13 @@ export class Library {
     for (const entry of entries) {
       const existing = videos[entry.videoId];
       if (existing !== undefined) {
-        if (policy === 'follow-mode' && this.canClaim(existing, subscription, entry)) {
+        const autoDownloads = policy === 'follow-mode' && subscription.mode === 'auto' && subscription.enabled;
+        if (existing.subscriptionId === subscription.id) {
+          existing.position = entry.position ?? existing.position ?? null;
+        } else if (this.canClaim(existing, subscription, entry, autoDownloads)) {
           existing.subscriptionId = subscription.id;
-          existing.status = 'queued';
+          existing.position = entry.position ?? null;
+          existing.status = autoDownloads ? 'queued' : 'available';
           existing.note = null;
           existing.updatedAt = now();
         }
@@ -558,6 +616,7 @@ export class Library {
         progress: null,
         filename: null,
         sentAt: null,
+        position: entry.position ?? null,
         foundAt: now(),
         updatedAt: now(),
       };

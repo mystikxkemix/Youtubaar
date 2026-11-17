@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ensureShowMetadata, SEASON_FOLDER, writeEpisodeMetadata, type VideoMetadata } from '../jellyfin';
+import { ensureShowMetadata, PLAYLIST_SEASON_FOLDER, SEASON_FOLDER, writeEpisodeMetadata, type VideoMetadata } from '../jellyfin';
 import { lastError, run } from '../process';
 import type { Video } from '../types';
 import type { DownloadJob, Downloader, UpdateCallback } from './types';
@@ -80,7 +80,9 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
   if (usesJellyfin(job)) {
     // Year seasons, a "-thumb.jpg" Jellyfin picks up as the episode image, and the
     // metadata the .nfo is written from once the file is in place.
-    const seasonDir = path.join(downloadDir, subscription.folder, SEASON_FOLDER);
+    // Channels: one season per upload year. Playlists: one season, in playlist order.
+    const ordered = subscription.kind === 'playlist' && Boolean(video.position);
+    const seasonDir = path.join(downloadDir, subscription.folder, ordered ? PLAYLIST_SEASON_FOLDER : SEASON_FOLDER);
     args.push(
       '-o', path.join(seasonDir, OUTPUT_TEMPLATE),
       '--write-thumbnail', '--convert-thumbnails', 'jpg',
@@ -270,7 +272,7 @@ export class YtdlpDownloader implements Downloader {
     }
     try {
       await ensureShowMetadata(path.join(this.downloadDir, job.subscription.folder), job.subscription);
-      await writeEpisodeMetadata(filename, metadata, job.subscription);
+      await writeEpisodeMetadata(filename, metadata, job.subscription, job.video.position);
       return null;
     } catch (error) {
       return `Downloaded, but the Jellyfin .nfo could not be written: ${(error as Error).message}`;
