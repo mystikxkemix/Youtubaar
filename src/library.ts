@@ -4,7 +4,7 @@ import type { Downloader, DownloadUpdate } from './downloaders/types';
 import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from './rules';
 import type { Store } from './store';
 import type { DownloadType, InitialAction, Mode, Subscription, Video, VideoStatus } from './types';
-import { fetchAvatar, fetchBacklog, fetchFeed, resolveSource, sourceUrl, type FeedEntry, type SourceRef } from './youtube';
+import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
 
 export interface SubscriptionInput {
   url?: string;
@@ -33,6 +33,15 @@ export interface SourcePreview extends SourceRef {
   alreadySubscribed: boolean;
   recent: FeedEntry[];
 }
+
+/** A channel playlist, with the subscription following it if any. */
+export interface PlaylistOption extends ChannelPlaylist {
+  subscriptionId: string | null;
+  mode: Mode | null;
+}
+
+const PLAYLIST_CACHE_MS = 10 * 60_000;
+const PLAYLIST_LIMIT = 300;
 
 /** Per-subscription figures for the library view. */
 export interface SubscriptionStats {
@@ -116,6 +125,8 @@ export class Library {
     return this.lastPollAt;
   }
 
+  private readonly playlistCache = new Map<string, { at: number; playlists: ChannelPlaylist[] }>();
+
   /** Set by the scheduler so the UI can say when the next check happens. */
   nextPollAt: string | null = null;
 
@@ -151,6 +162,22 @@ export class Library {
     };
   }
 
+  /** Playlists of a channel, marked with the ones already followed. Cached for a few minutes. */
+  async channelPlaylists(channelId: string): Promise<PlaylistOption[]> {
+    if (!/^UC[\w-]{22}$/.test(channelId)) {
+      throw new Error('Not a channel id');
+    }
+    let cached = this.playlistCache.get(channelId);
+    if (cached === undefined || Date.now() - cached.at > PLAYLIST_CACHE_MS) {
+      cached = { at: Date.now(), playlists: await fetchChannelPlaylists(channelId, this.ytdlpPath(), PLAYLIST_LIMIT) };
+      this.playlistCache.set(channelId, cached);
+    }
+    return cached.playlists.map((playlist) => {
+      const followed = this.subscriptions.find((s) => s.kind === 'playlist' && s.sourceId === playlist.id);
+      return { ...playlist, subscriptionId: followed?.id ?? null, mode: followed?.mode ?? null };
+    });
+  }
+
   async addSubscription(input: SubscriptionInput): Promise<{ subscription: Subscription; added: number }> {
     if (input.url === undefined || input.url.trim() === '') {
       throw new Error('A channel or playlist URL is required');
@@ -168,6 +195,8 @@ export class Library {
       name,
       url: sourceUrl(ref),
       avatar,
+      ownerChannelId: ref.kind === 'playlist' ? feed.ownerChannelId : ref.sourceId,
+      ownerName: ref.kind === 'playlist' ? feed.ownerName : name,
       folder: normalizeFolder(input.folder?.trim() || folderFromName(name)),
       mode: input.mode ?? 'manual',
       downloadType: input.downloadType ?? 'video',
@@ -231,6 +260,10 @@ export class Library {
       if (subscription.avatar === undefined) {
         // Subscriptions created before avatars existed get theirs on the next check.
         subscription.avatar = await fetchAvatar(subscription);
+      }
+      if (subscription.ownerChannelId === undefined) {
+        subscription.ownerChannelId = subscription.kind === 'playlist' ? feed.ownerChannelId : subscription.sourceId;
+        subscription.ownerName = subscription.kind === 'playlist' ? feed.ownerName : subscription.name;
       }
       subscription.lastError = null;
     } catch (error) {
@@ -448,12 +481,33 @@ export class Library {
     }
   }
 
+  /**
+   * A video found first through a subscription where you pick (e.g. the whole channel)
+   * is handed to an auto-downloading subscription that also lists it (e.g. one of the
+   * channel's playlists), unless you already decided about it. Videos you ignored
+   * yourself stay ignored; videos only skipped by the other subscription's filters do not.
+   */
+  private canClaim(video: Video, subscription: Subscription, entry: FeedEntry): boolean {
+    if (video.subscriptionId === subscription.id || subscription.mode !== 'auto' || !subscription.enabled) {
+      return false;
+    }
+    const undecided = video.status === 'available' || (video.status === 'ignored' && video.note !== null);
+    return undecided && filterReason(subscription, entry) === null;
+  }
+
   /** Files entries not seen before; returns how many were new. */
   private ingest(subscription: Subscription, entries: FeedEntry[], policy: IngestPolicy): number {
     const videos = this.store.data.videos;
     let added = 0;
     for (const entry of entries) {
-      if (videos[entry.videoId] !== undefined) {
+      const existing = videos[entry.videoId];
+      if (existing !== undefined) {
+        if (policy === 'follow-mode' && this.canClaim(existing, subscription, entry)) {
+          existing.subscriptionId = subscription.id;
+          existing.status = 'queued';
+          existing.note = null;
+          existing.updatedAt = now();
+        }
         continue;
       }
       const reason = filterReason(subscription, entry);

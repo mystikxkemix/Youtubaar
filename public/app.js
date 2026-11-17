@@ -408,6 +408,7 @@ pages.library = async () => {
         fresh > 0 ? el('span', { class: 'new', text: `${fresh} new` }) : null,
         el('span', { text: `${s.counts?.done ?? 0} downloaded` }),
         !s.enabled ? el('span', { class: 'paused', text: 'Paused' }) : null,
+        s.kind === 'playlist' ? el('span', { class: 'owner', text: s.ownerName ? `Playlist by ${s.ownerName}` : 'Playlist' }) : null,
       ]),
     ]);
   }))];
@@ -441,6 +442,7 @@ pages.channel = async (id) => {
       toast(subscription.enabled ? 'Paused: no more checks until you resume' : 'Resumed');
       await refresh();
     } }),
+    subscription.kind === 'channel' ? button('Playlists', { icon: 'playlist', small: true, onclick: () => openPlaylistsDialog(subscription) }) : null,
     button('Edit', { icon: 'edit', small: true, onclick: () => openEditDialog(subscription) }),
     button('Delete', { icon: 'trash', small: true, variant: 'danger', onclick: () => confirmDelete(subscription) }),
   ]);
@@ -458,6 +460,7 @@ pages.channel = async (id) => {
           subscription.titleInclude || subscription.titleExclude || subscription.skipShorts
             ? el('span', { class: 'fact' }, [icon('filter'), [subscription.titleInclude && `Only "${subscription.titleInclude}"`, subscription.titleExclude && `Not "${subscription.titleExclude}"`, subscription.skipShorts && 'No Shorts'].filter(Boolean).join(', ')])
             : null,
+          subscription.kind === 'playlist' && subscription.ownerName ? ownerFact(subscription) : null,
           !subscription.enabled ? el('span', { class: 'fact' }, [icon('pause'), 'Paused']) : null,
           subscription.lastError ? el('span', { class: 'fact alert', title: subscription.lastError }, `Last check failed: ${subscription.lastError}`) : null,
         ]),
@@ -487,6 +490,13 @@ pages.channel = async (id) => {
   const body = prefs.get('channelView') === 'grid' ? cardGrid(videos, false) : monthGroups(subscription, videos);
   return [hero, toolbar, body, selectionBar(videos)];
 };
+
+/** "By <channel>" on a playlist, linking to that channel's page when it is followed too. */
+function ownerFact(subscription) {
+  const owner = state.subscriptions.find((s) => s.kind === 'channel' && s.sourceId === subscription.ownerChannelId);
+  const href = owner ? `#/channel/${owner.id}` : `https://www.youtube.com/channel/${subscription.ownerChannelId}`;
+  return el('a', { class: 'fact', href, target: owner ? undefined : '_blank', rel: owner ? undefined : 'noopener' }, [icon('channel'), `By ${subscription.ownerName}`]);
+}
 
 /** Videos grouped by upload month, like seasons in Sonarr. Undated backlog entries go last. */
 function monthGroups(subscription, videos) {
@@ -830,7 +840,145 @@ function settingsFields(initial, options = {}) {
     skipShorts: skipShorts.checked,
     ...(initialSelect ? { initial: initialSelect.value } : {}),
   });
-  return { section, read, folder };
+  return { section, read, folder, choice };
+}
+
+/** Same rule as the server: folder names cannot hold path separators or reserved characters. */
+function folderName(name) {
+  return name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Playlist';
+}
+
+/**
+ * Lists a channel's playlists with a Follow switch and an Auto-download switch each.
+ * In "live" mode switches act at once (channel page); otherwise they are read on submit (add dialog).
+ */
+function playlistPicker(channelId, options = {}) {
+  const rows = new Map();
+  const list = el('div', { class: 'pl-list' }, el('p', { class: 'pl-empty', text: 'Loading playlists from YouTube…' }));
+  const filter = el('input', { type: 'search', class: 'pl-filter', placeholder: 'Filter playlists', hidden: true, 'aria-label': 'Filter playlists' });
+  const count = el('span', { class: 'muted' });
+  const node = el('div', { class: 'pl-picker' }, [
+    el('div', { class: 'pl-head' }, [el('h3', {}, ['Playlists ', count]), filter]),
+    el('p', { class: 'hint', text: 'Follow a playlist to get the videos added to it. Turn on auto-download to download them as soon as they appear.' }),
+    list,
+  ]);
+
+  const switchInput = (label, checked, disabled, onchange) => el('label', { class: 'switch' }, [
+    el('input', { type: 'checkbox', checked, disabled, onchange, role: 'switch' }),
+    el('span', { text: label }),
+  ]);
+
+  const renderRow = (playlist) => {
+    const followed = playlist.subscriptionId !== null;
+    let follow;
+    let auto;
+    // In the add dialog, auto-download only makes sense once Follow is on. On the channel
+    // page Follow acts at once, so auto-download is chosen first.
+    const changed = () => {
+      auto.querySelector('input').disabled = !followed && !options.live && !follow.querySelector('input').checked;
+      options.onchange?.();
+    };
+    follow = switchInput(followed ? 'Following' : 'Follow', followed, followed, async (event) => {
+      if (options.live && event.target.checked) {
+        event.target.disabled = true;
+        try {
+          await options.follow(playlist, auto.querySelector('input').checked);
+          toast(`Following ${playlist.title}`);
+          await refresh();
+          options.onfollowed?.();
+          return;
+        } catch (error) {
+          event.target.checked = false;
+          event.target.disabled = false;
+          toast(error.message, true);
+        }
+      }
+      changed();
+    });
+    auto = switchInput('Auto-download', playlist.mode === 'auto', !followed && !options.live, async (event) => {
+      if (options.live && followed) {
+        try {
+          await api(`/api/subscriptions/${playlist.subscriptionId}`, { method: 'PATCH', body: { mode: event.target.checked ? 'auto' : 'manual' } });
+          toast(event.target.checked ? `New videos in ${playlist.title} will download automatically` : `New videos in ${playlist.title} will wait in your inbox`);
+          await refresh();
+        } catch (error) {
+          event.target.checked = !event.target.checked;
+          toast(error.message, true);
+        }
+      }
+      changed();
+    });
+    const row = el('div', { class: `pl-row${followed ? ' followed' : ''}` }, [
+      playlist.thumbnail ? el('img', { src: playlist.thumbnail, alt: '', loading: 'lazy' }) : el('span', { class: 'pl-thumb' }),
+      el('div', { class: 'pl-title' }, [
+        followed ? el('a', { href: `#/channel/${playlist.subscriptionId}`, onclick: closeDialog, text: playlist.title }) : el('a', { href: playlist.url, target: '_blank', rel: 'noopener', text: playlist.title }),
+      ]),
+      follow,
+      auto,
+    ]);
+    rows.set(playlist.id, { playlist, row, follow: follow.querySelector('input'), auto: auto.querySelector('input'), followed });
+    return row;
+  };
+
+  filter.addEventListener('input', () => {
+    const query = filter.value.trim().toLowerCase();
+    for (const { playlist, row } of rows.values()) row.hidden = query !== '' && !playlist.title.toLowerCase().includes(query);
+  });
+
+  api(`/api/channels/${channelId}/playlists`).then((playlists) => {
+    count.textContent = String(playlists.length);
+    if (playlists.length === 0) {
+      list.replaceChildren(el('p', { class: 'pl-empty', text: 'This channel has no public playlists.' }));
+      return;
+    }
+    filter.hidden = playlists.length < 8;
+    list.replaceChildren(...playlists.map(renderRow));
+  }).catch((error) => {
+    list.replaceChildren(el('p', { class: 'pl-empty error', text: `Could not list playlists: ${error.message}` }));
+  });
+
+  return {
+    node,
+    /** Playlists switched on and not followed yet, with their auto-download choice. */
+    selected: () => [...rows.values()].filter((entry) => !entry.followed && entry.follow.checked).map((entry) => ({ ...entry.playlist, auto: entry.auto.checked })),
+  };
+}
+
+/** Settings a new playlist inherits from the channel it belongs to. */
+function playlistBody(playlist, base, auto) {
+  return {
+    ...base,
+    url: playlist.url,
+    mode: auto ? 'auto' : 'manual',
+    folder: `${base.folder || 'YouTube'}/${folderName(playlist.title)}`,
+  };
+}
+
+function openPlaylistsDialog(subscription) {
+  const base = {
+    folder: subscription.folder,
+    downloadType: subscription.downloadType,
+    format: subscription.format,
+    quality: subscription.quality,
+    titleInclude: subscription.titleInclude,
+    titleExclude: subscription.titleExclude,
+    skipShorts: subscription.skipShorts,
+    initial: 'available',
+  };
+  const picker = playlistPicker(subscription.sourceId, {
+    live: true,
+    follow: (playlist, auto) => api('/api/subscriptions', { method: 'POST', body: playlistBody(playlist, base, auto) }),
+    // Re-list so the new playlist shows as followed, with a working auto-download switch.
+    onfollowed: () => openPlaylistsDialog(subscription),
+  });
+  showDialog(el('form', { onsubmit: (event) => { event.preventDefault(); closeDialog(); } }, [
+    el('div', { class: 'head' }, [ring(subscription, 64, { plain: true }), el('div', {}, [
+      el('h2', { text: `${subscription.name} playlists` }),
+      el('p', { text: `New playlists use this channel's format and save into ${subscription.folder || 'the download folder'}/<playlist name>.` }),
+    ])]),
+    picker.node,
+    el('div', { class: 'foot' }, [button('Done', { type: 'submit', variant: 'primary' })]),
+  ]));
 }
 
 function formError() {
@@ -870,26 +1018,57 @@ function openAddDialog() {
 }
 
 function showAddStep(url, preview) {
+  const isChannel = preview.kind === 'channel';
   const fields = settingsFields({ folder: preview.suggestedFolder }, { withInitial: true });
   const error = formError();
-  const submit = button(`Add ${preview.kind}`, { type: 'submit', variant: 'primary', icon: 'plus', disabled: preview.alreadySubscribed });
+  const submit = button(`Add ${preview.kind}`, { type: 'submit', variant: 'primary', icon: 'plus' });
   const pseudo = { name: preview.name, avatar: preview.avatar, enabled: true };
+
+  // A channel can be followed for all its uploads, for some of its playlists, or both.
+  const followAll = el('input', { type: 'checkbox', role: 'switch', checked: !preview.alreadySubscribed, disabled: preview.alreadySubscribed });
+  let picker = null;
+  const update = () => {
+    const wanted = (followAll.checked && !preview.alreadySubscribed ? 1 : 0) + (picker ? picker.selected().length : 0);
+    fields.choice.hidden = !followAll.checked || preview.alreadySubscribed;
+    submit.disabled = wanted === 0;
+    submit.querySelector('span').textContent = wanted <= 1 ? (followAll.checked && !preview.alreadySubscribed ? `Add ${preview.kind}` : 'Follow playlist') : `Follow ${wanted}`;
+  };
+  followAll.addEventListener('change', update);
+  if (isChannel) picker = playlistPicker(preview.sourceId, { onchange: update });
+
   const form = el('form', {
     onsubmit: async (event) => {
       event.preventDefault();
       error.hidden = true;
       submit.disabled = true;
-      try {
-        const { subscription, added } = await api('/api/subscriptions', { method: 'POST', body: { url, ...fields.read() } });
-        closeDialog();
-        toast(`Added ${subscription.name} with ${plural(added, 'video')}`);
-        await refresh();
-        location.hash = `#/channel/${subscription.id}`;
-      } catch (addError) {
-        error.textContent = addError.message;
+      const values = fields.read();
+      const requests = [];
+      if (followAll.checked && !preview.alreadySubscribed) requests.push({ label: preview.name, body: { url, ...values } });
+      for (const playlist of picker ? picker.selected() : []) {
+        requests.push({ label: playlist.title, body: playlistBody(playlist, values, playlist.auto) });
+      }
+      const created = [];
+      const failures = [];
+      for (const request of requests) {
+        try {
+          created.push(await api('/api/subscriptions', { method: 'POST', body: request.body }));
+        } catch (addError) {
+          failures.push(`${request.label}: ${addError.message}`);
+        }
+      }
+      if (failures.length > 0) {
+        error.textContent = failures.join('\n');
         error.hidden = false;
         submit.disabled = false;
+        if (created.length === 0) return;
+      } else {
+        closeDialog();
       }
+      toast(created.length === 1
+        ? `Added ${created[0].subscription.name} with ${plural(created[0].added, 'video')}`
+        : `Added ${plural(created.length, 'subscription')}`);
+      await refresh();
+      if (failures.length === 0 && created.length > 0) location.hash = `#/channel/${created[0].subscription.id}`;
     },
   }, [
     el('div', { class: 'head' }, [
@@ -900,8 +1079,13 @@ function showAddStep(url, preview) {
       ]),
     ]),
     preview.recent.length > 0 ? el('div', { class: 'preview-strip' }, preview.recent.slice(0, 4).map((entry) => el('img', { src: entry.thumbnail, alt: entry.title, title: entry.title, loading: 'lazy' }))) : null,
-    preview.alreadySubscribed ? el('p', { class: 'form-error', text: `You already follow this ${preview.kind}.` }) : null,
+    preview.alreadySubscribed && !isChannel ? el('p', { class: 'form-error', text: 'You already follow this playlist.' }) : null,
+    isChannel ? el('label', { class: 'switch big' }, [followAll, el('span', {}, [
+      el('b', { text: preview.alreadySubscribed ? 'You already follow all uploads' : 'All uploads' }),
+      el('small', { text: preview.alreadySubscribed ? 'Pick playlists below to follow them too.' : 'Every video this channel publishes.' }),
+    ])]) : null,
     fields.section,
+    picker ? picker.node : null,
     error,
     el('div', { class: 'foot' }, [
       button('Back', { variant: 'ghost', onclick: openAddDialog }),
@@ -909,7 +1093,10 @@ function showAddStep(url, preview) {
       submit,
     ]),
   ]);
+  if (preview.alreadySubscribed && !isChannel) submit.disabled = true;
   showDialog(form);
+  update();
+  if (preview.alreadySubscribed && !isChannel) submit.disabled = true;
 }
 
 function openEditDialog(subscription) {

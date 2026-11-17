@@ -133,6 +133,8 @@ export function createServer(config: Config, library: Library, downloaderName: s
     return library.subscriptions.map((subscription) => ({ ...subscription, ...stats[subscription.id] }));
   });
 
+  route('GET', '/api/channels/(UC[\\w-]{22})/playlists', ({ params }) => library.channelPlaylists(params[0]));
+
   route('POST', '/api/lookup', async ({ body }) => library.lookup(String((body as { url?: unknown }).url ?? '')));
 
   route('POST', '/api/subscriptions', async ({ body }) => library.addSubscription(body as SubscriptionInput));
