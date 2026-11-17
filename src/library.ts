@@ -1,10 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 import type { Config } from './config';
 import type { Downloader, DownloadUpdate } from './downloaders/types';
+import { ensureShowMetadata, placeEpisode, type VideoMetadata } from './jellyfin';
 import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from './rules';
 import type { Store } from './store';
 import type { DownloadType, InitialAction, Mode, Subscription, Video, VideoStatus } from './types';
-import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
+import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, fetchVideoMetadata, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
 
 export interface SubscriptionInput {
   url?: string;
@@ -303,6 +306,46 @@ export class Library {
       this.lastPollAt = now();
     }
     return added;
+  }
+
+  /**
+   * Brings videos already downloaded for a subscription into the Jellyfin layout: season
+   * folder, Kodi name, .nfo and thumbnail. Metadata is read again from YouTube (no
+   * re-download). Safe to run twice: placed videos keep their name and number.
+   */
+  async organizeForJellyfin(id: string): Promise<{ organized: number; failed: string[] }> {
+    const subscription = this.getSubscription(id);
+    if (!subscription.jellyfin) {
+      throw new Error('Turn on Jellyfin metadata for this subscription first');
+    }
+    if (this.config.downloader !== 'ytdlp') {
+      throw new Error('Organizing needs the built-in yt-dlp downloader (MeTube keeps its own files)');
+    }
+    const showDir = path.join(this.config.downloadDir, subscription.folder);
+    await ensureShowMetadata(showDir, subscription);
+    let organized = 0;
+    const failed: string[] = [];
+    for (const video of Object.values(this.store.data.videos)) {
+      if (video.subscriptionId !== id || video.status !== 'done' || video.filename === null) {
+        continue;
+      }
+      const current = path.join(this.config.downloadDir, video.filename);
+      if (!fs.existsSync(current)) {
+        failed.push(`${video.title}: file not found (${video.filename})`);
+        continue;
+      }
+      try {
+        const metadata = (await fetchVideoMetadata(video.url, this.ytdlpPath())) as unknown as VideoMetadata;
+        const placed = await placeEpisode(current, showDir, metadata, subscription, video.position, video.thumbnail);
+        video.filename = path.relative(this.config.downloadDir, placed);
+        video.updatedAt = now();
+        organized++;
+      } catch (error) {
+        failed.push(`${video.title}: ${(error as Error).message}`);
+      }
+    }
+    this.store.save();
+    return { organized, failed };
   }
 
   /** Lists the source's older videos (beyond the feed's latest 15) into the inbox. Needs yt-dlp. */

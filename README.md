@@ -99,12 +99,18 @@ upload year a season, each video an episode.
 
 ```
 <download folder>/<subscription folder>/
-  tvshow.nfo, poster.jpg                       show title, channel avatar
+  tvshow.nfo, poster.jpg                                  show title, channel avatar
   Season_2026/
-    2026-11-17_Title_id.mp4
-    2026-11-17_Title_id.nfo                title, description, air date, tags
-    2026-11-17_Title_id-thumb.jpg          episode image
+    mistermv_S2026E111701_Episode_title.mp4               Kodi name: Show_SxxEyy_Title
+    mistermv_S2026E111701_Episode_title.nfo               title, description, air date, tags
+    mistermv_S2026E111701_Episode_title-thumb.jpg         episode image
 ```
+
+Files use Kodi's episode naming (`Show_SxxEyy_Title`, no spaces or special characters),
+so Jellyfin and Kodi both recognize them even without the `.nfo` files. Videos
+downloaded before you turned the option on: open the subscription and click
+**Organize for Jellyfin** to move them into their season with Kodi names, `.nfo`
+files and thumbnails (metadata is read again from YouTube, nothing is re-downloaded).
 
 1. Mount the folder Jellyfin reads as Youtubaar's `/downloads`, e.g. on ZimaOS
    `- /DATA/Media/YouTube:/downloads`, with the same folder in Jellyfin's container.
@@ -120,7 +126,7 @@ A Jellyfin show folder cannot sit inside another subscription's folder (it would
 as a season), and Youtubaar refuses that setup.
 
 For channels, episodes are numbered by date (`111701` = 17 Nov, first video that day), so they sort
-in upload order. Videos downloaded before turning the option on keep their old place.
+in upload order. Videos downloaded before turning the option on move in with **Organize for Jellyfin**.
 It needs the built-in yt-dlp downloader (MeTube saves files its own way) and applies
 to video downloads only.
 

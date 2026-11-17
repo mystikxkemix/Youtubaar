@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ensureShowMetadata, PLAYLIST_SEASON_FOLDER, SEASON_FOLDER, writeEpisodeMetadata, type VideoMetadata } from '../jellyfin';
+import { ensureShowMetadata, PLAYLIST_SEASON_FOLDER, placeEpisode, SEASON_FOLDER, type VideoMetadata } from '../jellyfin';
 import { lastError, run } from '../process';
 import type { Video } from '../types';
 import type { DownloadJob, Downloader, UpdateCallback } from './types';
@@ -78,8 +78,8 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
     }
   }
   if (usesJellyfin(job)) {
-    // Year seasons, a "-thumb.jpg" Jellyfin picks up as the episode image, and the
-    // metadata the .nfo is written from once the file is in place.
+    // Downloaded into its season under a temporary name with a "-thumb.jpg", plus the
+    // metadata the .nfo is written from; placeEpisode then gives it its Kodi name.
     // Channels: one season per upload year. Playlists: one season, in playlist order.
     const ordered = subscription.kind === 'playlist' && Boolean(video.position);
     const seasonDir = path.join(downloadDir, subscription.folder, ordered ? PLAYLIST_SEASON_FOLDER : SEASON_FOLDER);
@@ -247,15 +247,14 @@ export class YtdlpDownloader implements Downloader {
       throw new Error(lastError(result.stderr));
     }
     let note: string | null = null;
-    if (filename !== null) {
+    if (usesJellyfin(job)) {
+      ({ filename, note } = await this.placeForJellyfin(job, filename, metadata));
+    } else if (filename !== null) {
       try {
         filename = await tidyDownload(filename);
       } catch {
         // Keep yt-dlp's name if the rename fails; the download itself is fine.
       }
-    }
-    if (usesJellyfin(job)) {
-      note = await this.writeJellyfinMetadata(job, filename, metadata);
     }
     this.onUpdate(videoId, {
       status: 'done',
@@ -265,17 +264,17 @@ export class YtdlpDownloader implements Downloader {
     });
   }
 
-  /** Show and episode metadata; a failure is reported on the video but keeps the download. */
-  private async writeJellyfinMetadata(job: DownloadJob, filename: string | null, metadata: VideoMetadata | null): Promise<string | null> {
+  /** Kodi name, season folder and metadata; a failure is reported on the video but keeps the download. */
+  private async placeForJellyfin(job: DownloadJob, filename: string | null, metadata: VideoMetadata | null): Promise<{ filename: string | null; note: string | null }> {
     if (filename === null || metadata === null) {
-      return 'Downloaded, but yt-dlp gave no metadata for the Jellyfin .nfo';
+      return { filename, note: 'Downloaded, but yt-dlp gave no metadata for the Jellyfin .nfo' };
     }
     try {
-      await ensureShowMetadata(path.join(this.downloadDir, job.subscription.folder), job.subscription);
-      await writeEpisodeMetadata(filename, metadata, job.subscription, job.video.position);
-      return null;
+      const showDir = path.join(this.downloadDir, job.subscription.folder);
+      await ensureShowMetadata(showDir, job.subscription);
+      return { filename: await placeEpisode(filename, showDir, metadata, job.subscription, job.video.position), note: null };
     } catch (error) {
-      return `Downloaded, but the Jellyfin .nfo could not be written: ${(error as Error).message}`;
+      return { filename, note: `Downloaded, but it could not be named and tagged for Jellyfin: ${(error as Error).message}` };
     }
   }
 

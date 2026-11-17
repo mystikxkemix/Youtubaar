@@ -339,6 +339,19 @@ export function mergeListing(listing: FeedEntry[], feed: FeedEntry[]): FeedEntry
   });
 }
 
+/** The fields Youtubaar writes into .nfo files, for one video, without downloading it. */
+export async function fetchVideoMetadata(url: string, ytdlpPath: string): Promise<Record<string, unknown>> {
+  const result = await run(ytdlpPath, [
+    '--skip-download', '--no-playlist', '--js-runtimes', `node:${process.execPath}`,
+    '--print', '%(.{id,title,description,upload_date,timestamp,duration,channel,uploader,webpage_url,tags})j',
+    url,
+  ], { timeoutMs: 2 * 60_000 });
+  if (result.code !== 0) {
+    throw new Error(lastError(result.stderr));
+  }
+  return JSON.parse(result.stdout.trim().split('\n').pop() ?? '{}') as Record<string, unknown>;
+}
+
 interface FlatPlaylist {
   id?: string;
   title?: string;
