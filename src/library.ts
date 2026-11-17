@@ -17,6 +17,7 @@ export interface SubscriptionInput {
   titleInclude?: string;
   titleExclude?: string;
   skipShorts?: boolean;
+  jellyfin?: boolean;
   enabled?: boolean;
   /** Creation only: what to do with the videos already in the source. */
   initial?: InitialAction;
@@ -205,6 +206,7 @@ export class Library {
       titleInclude: input.titleInclude ?? '',
       titleExclude: input.titleExclude ?? '',
       skipShorts: input.skipShorts ?? false,
+      jellyfin: input.jellyfin ?? false,
       enabled: input.enabled ?? true,
       createdAt: now(),
       lastCheckedAt: now(),
@@ -230,6 +232,7 @@ export class Library {
       titleInclude: input.titleInclude ?? current.titleInclude,
       titleExclude: input.titleExclude ?? current.titleExclude,
       skipShorts: input.skipShorts ?? current.skipShorts,
+      jellyfin: input.jellyfin ?? current.jellyfin ?? false,
       enabled: input.enabled ?? current.enabled,
     };
     this.validate(next);
@@ -476,6 +479,9 @@ export class Library {
     validateDownloadOptions(subscription);
     compileTitleFilter(subscription.titleInclude);
     compileTitleFilter(subscription.titleExclude);
+    if (subscription.jellyfin === true && subscription.downloadType !== 'video') {
+      throw new Error('The Jellyfin layout is for video downloads; turn it off for audio');
+    }
     if (subscription.mode !== 'auto' && subscription.mode !== 'manual') {
       throw new Error('Mode must be "auto" or "manual"');
     }

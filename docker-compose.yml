@@ -17,4 +17,6 @@ services:
       # METUBE_URL: http://<metube-host>:8081
     volumes:
       - ./data:/data                # subscriptions and video list
-      - ./downloads:/downloads      # downloaded videos, one folder per subscription
+      # Downloaded videos, one folder per subscription. To feed Jellyfin, use the folder
+      # its "Shows" library reads, e.g. /DATA/Media/YouTube:/downloads.
+      - ./downloads:/downloads

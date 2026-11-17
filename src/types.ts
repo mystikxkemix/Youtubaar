@@ -44,6 +44,8 @@ export interface Subscription extends DownloadOptions {
   titleInclude: string;
   titleExclude: string;
   skipShorts: boolean;
+  /** Save as a Jellyfin show: season folders, .nfo files and thumbnails (yt-dlp downloader). */
+  jellyfin?: boolean;
   enabled: boolean;
   createdAt: string;
   lastCheckedAt: string | null;
