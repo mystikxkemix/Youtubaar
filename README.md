@@ -37,6 +37,8 @@ YouTube RSS feeds ──poll──▶ Youtubaar ──"download this"──▶ y
   (up to `BACKLOG_LIMIT`) into the inbox, never auto-downloaded.
 - **Per-subscription settings, all editable later**: folder, video/audio, format,
   quality, title include/exclude regex (case-insensitive), skip Shorts, pause.
+- **Jellyfin**: optional per-subscription show layout with `.nfo` metadata, thumbnails
+  and posters, ready for a Jellyfin *Shows* library (see below).
 - **Download tracking**: progress, final file name, failure reason, retry.
 
 ## Run with Docker
@@ -81,6 +83,33 @@ image on the Mac and load it on the box:
 
 For age-restricted or members-only videos, put a `cookies.txt` export in
 `/DATA/AppData/youtubaar` and set `YTDLP_EXTRA_ARGS: --cookies /data/cookies.txt`.
+
+## Jellyfin
+
+Turn on **Jellyfin metadata** on a subscription (when adding it, or with *Edit*) to
+save it the way a Jellyfin *Shows* library reads it: the subscription is a show, each
+upload year a season, each video an episode.
+
+```
+<download folder>/<subscription folder>/
+  tvshow.nfo, poster.jpg                       show title, channel avatar
+  Season 2026/
+    2026-11-17 - Title [id].mp4
+    2026-11-17 - Title [id].nfo                title, description, air date, tags
+    2026-11-17 - Title [id]-thumb.jpg          episode image
+```
+
+1. Mount the folder Jellyfin reads as Youtubaar's `/downloads`, e.g. on ZimaOS
+   `- /DATA/Media/YouTube:/downloads`, with the same folder in Jellyfin's container.
+2. In Jellyfin, add a library of type **Shows** on that folder. Keep the **Nfo**
+   metadata reader on, and untick the online metadata downloaders (TheTVDB, TheMovieDb)
+   so Jellyfin does not try to match YouTube channels against TV databases.
+3. New downloads appear after Jellyfin's next scan (or *Scan library*).
+
+Episodes are numbered by date (`111701` = 17 Nov, first video that day), so they sort
+in upload order. Videos downloaded before turning the option on keep their old place.
+It needs the built-in yt-dlp downloader (MeTube saves files its own way) and applies
+to video downloads only.
 
 ## Keeping yt-dlp up to date
 

@@ -467,6 +467,7 @@ pages.channel = async (id) => {
           el('span', { class: 'fact' }, [icon(subscription.kind === 'playlist' ? 'playlist' : 'channel'), subscription.kind === 'playlist' ? 'Playlist' : 'Channel']),
           el('span', { class: 'fact' }, [icon(subscription.mode === 'auto' ? 'bolt' : 'pick'), subscription.mode === 'auto' ? 'Downloads new videos' : 'You pick new videos']),
           el('span', { class: 'fact' }, [icon(subscription.downloadType === 'audio' ? 'music' : 'film'), qualityText(subscription)]),
+          subscription.jellyfin ? el('span', { class: 'fact', title: 'Saved as a Jellyfin show with .nfo metadata' }, [icon('library'), 'Jellyfin metadata']) : null,
           el('span', { class: 'fact' }, [icon('folder'), subscription.folder || 'Download root']),
           subscription.titleInclude || subscription.titleExclude || subscription.skipShorts
             ? el('span', { class: 'fact' }, [icon('filter'), [subscription.titleInclude && `Only "${subscription.titleInclude}"`, subscription.titleExclude && `Not "${subscription.titleExclude}"`, subscription.skipShorts && 'No Shorts'].filter(Boolean).join(', ')])
@@ -821,10 +822,22 @@ function settingsFields(initial, options = {}) {
     select.replaceChildren(...list.map(([v, text]) => el('option', { value: v, text })));
     select.value = list.some(([v]) => v === value) ? value : list[0][0];
   };
+  // Jellyfin layout: video only, and written by the built-in yt-dlp downloader.
+  const jellyfinInput = el('input', { type: 'checkbox', role: 'switch', checked: initial.jellyfin ?? false });
+  const viaMeTube = state.status?.downloader === 'MeTube';
+  const jellyfinHint = el('small');
   const syncFormats = (formatValue, qualityValue) => {
     const catalog = FORMATS[type.value];
     fill(format, catalog.formats, formatValue ?? format.value);
     fill(quality, catalog.qualities, qualityValue ?? quality.value);
+    const audio = type.value === 'audio';
+    jellyfinInput.disabled = audio || viaMeTube;
+    if (jellyfinInput.disabled) jellyfinInput.checked = false;
+    jellyfinHint.textContent = viaMeTube
+      ? 'Needs the built-in yt-dlp downloader; MeTube saves files its own way.'
+      : audio
+        ? 'For video downloads only.'
+        : 'Saves this as a TV show for a Jellyfin "Shows" library: year seasons, .nfo metadata, thumbnails and a poster.';
   };
   syncFormats(initial.format, initial.quality);
 
@@ -845,6 +858,7 @@ function settingsFields(initial, options = {}) {
       el('label', { class: 'field' }, [el('span', { text: 'Format' }), format]),
       el('label', { class: 'field' }, [el('span', { text: 'Quality' }), quality]),
     ]),
+    el('label', { class: 'switch big' }, [jellyfinInput, el('span', {}, [el('b', { text: 'Jellyfin metadata' }), jellyfinHint])]),
     initialSelect ? el('label', { class: 'field' }, [el('span', { text: 'Videos already on the channel (latest 15)' }), initialSelect]) : null,
     el('details', { class: 'more', open: hasFilters }, [
       el('summary', { text: 'Filters' }),
@@ -867,6 +881,7 @@ function settingsFields(initial, options = {}) {
     titleInclude: include.value,
     titleExclude: exclude.value,
     skipShorts: skipShorts.checked,
+    jellyfin: jellyfinInput.checked,
     ...(initialSelect ? { initial: initialSelect.value } : {}),
   });
   return { section, read, folder, choice };
@@ -1003,6 +1018,7 @@ function playlistContext(subscription) {
       titleInclude: subscription.titleInclude,
       titleExclude: subscription.titleExclude,
       skipShorts: subscription.skipShorts,
+      jellyfin: subscription.jellyfin ?? false,
       initial: 'available',
     },
   };

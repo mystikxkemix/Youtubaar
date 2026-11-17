@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { ensureShowMetadata, SEASON_FOLDER, writeEpisodeMetadata, type VideoMetadata } from '../jellyfin';
 import { lastError, run } from '../process';
 import type { Video } from '../types';
 import type { DownloadJob, Downloader, UpdateCallback } from './types';
@@ -8,6 +9,12 @@ const PROGRESS_INTERVAL_MS = 1_000;
 const FILEPATH_MARKER = 'YOUTUBAAR_FILE:';
 const FORMATS_MARKER = 'YOUTUBAAR_FORMATS:';
 const PROGRESS_MARKER = 'YOUTUBAAR_PROGRESS:';
+const META_MARKER = 'YOUTUBAAR_META:';
+
+/** Whether this job is saved in the Jellyfin show layout. */
+export function usesJellyfin(job: DownloadJob): boolean {
+  return job.subscription.jellyfin === true && job.subscription.downloadType === 'video';
+}
 
 export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs: string[]): string[] {
   const { subscription, video } = job;
@@ -43,7 +50,20 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
       args.push('--merge-output-format', 'mp4');
     }
   }
-  args.push('-o', path.join(downloadDir, subscription.folder, OUTPUT_TEMPLATE), ...extraArgs, video.url);
+  if (usesJellyfin(job)) {
+    // Year seasons, a "-thumb.jpg" Jellyfin picks up as the episode image, and the
+    // metadata the .nfo is written from once the file is in place.
+    const seasonDir = path.join(downloadDir, subscription.folder, SEASON_FOLDER);
+    args.push(
+      '-o', path.join(seasonDir, OUTPUT_TEMPLATE),
+      '--write-thumbnail', '--convert-thumbnails', 'jpg',
+      '-o', `thumbnail:${path.join(seasonDir, OUTPUT_TEMPLATE.replace('.%(ext)s', '-thumb.%(ext)s'))}`,
+      '--print', `after_move:${META_MARKER}%(.{id,title,description,upload_date,timestamp,duration,channel,uploader,webpage_url,tags})j`,
+    );
+  } else {
+    args.push('-o', path.join(downloadDir, subscription.folder, OUTPUT_TEMPLATE));
+  }
+  args.push(...extraArgs, video.url);
   return args;
 }
 
@@ -166,6 +186,7 @@ export class YtdlpDownloader implements Downloader {
     const videoId = job.video.id;
     const tracker = new ProgressTracker();
     let filename: string | null = null;
+    let metadata: VideoMetadata | null = null;
     let lastReport = 0;
     let lastPercent = -1;
     this.onUpdate(videoId, { status: 'downloading', progress: 0 });
@@ -174,6 +195,14 @@ export class YtdlpDownloader implements Downloader {
       onLine: (line) => {
         if (line.startsWith(FILEPATH_MARKER)) {
           filename = line.slice(FILEPATH_MARKER.length);
+          return;
+        }
+        if (line.startsWith(META_MARKER)) {
+          try {
+            metadata = JSON.parse(line.slice(META_MARKER.length)) as VideoMetadata;
+          } catch {
+            // Without metadata the video is still downloaded, only without its .nfo.
+          }
           return;
         }
         const percent = tracker.line(line);
@@ -188,12 +217,30 @@ export class YtdlpDownloader implements Downloader {
     if (result.code !== 0) {
       throw new Error(lastError(result.stderr));
     }
+    let note: string | null = null;
+    if (usesJellyfin(job)) {
+      note = await this.writeJellyfinMetadata(job, filename, metadata);
+    }
     this.onUpdate(videoId, {
       status: 'done',
       progress: 100,
       filename: filename === null ? null : path.relative(this.downloadDir, filename),
-      note: null,
+      note,
     });
+  }
+
+  /** Show and episode metadata; a failure is reported on the video but keeps the download. */
+  private async writeJellyfinMetadata(job: DownloadJob, filename: string | null, metadata: VideoMetadata | null): Promise<string | null> {
+    if (filename === null || metadata === null) {
+      return 'Downloaded, but yt-dlp gave no metadata for the Jellyfin .nfo';
+    }
+    try {
+      await ensureShowMetadata(path.join(this.downloadDir, job.subscription.folder), job.subscription);
+      await writeEpisodeMetadata(filename, metadata, job.subscription);
+      return null;
+    } catch (error) {
+      return `Downloaded, but the Jellyfin .nfo could not be written: ${(error as Error).message}`;
+    }
   }
 
   async sync(_active: Video[]): Promise<void> {
