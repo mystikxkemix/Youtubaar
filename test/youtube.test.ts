@@ -1,4 +1,10 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { loadConfig } from '../src/config';
+import { Library } from '../src/library';
+import { Store } from '../src/store';
 import { test } from 'node:test';
 import { indexHistory } from '../src/downloaders/metube';
 import { buildYtdlpArgs } from '../src/downloaders/ytdlp';
@@ -13,6 +19,7 @@ const FEED = `<?xml version="1.0" encoding="UTF-8"?>
  <id>yt:channel:abcdefghijklmnopqrstuv</id>
  <yt:channelId>abcdefghijklmnopqrstuv</yt:channelId>
  <title>Tom &amp; Jerry&#39;s Lab</title>
+ <author><name>Tom &amp; Jerry</name><uri>https://www.youtube.com/channel/UCabcdefghijklmnopqrstuv</uri></author>
  <entry>
   <id>yt:video:AAAAAAAAAAA</id>
   <yt:videoId>AAAAAAAAAAA</yt:videoId>
@@ -53,6 +60,8 @@ function video(overrides: Partial<Video> = {}): Video {
 test('parseFeed reads entries, decodes entities and flags Shorts', () => {
   const feed = parseFeed(FEED);
   assert.equal(feed.title, "Tom & Jerry's Lab");
+  assert.equal(feed.ownerChannelId, 'UCabcdefghijklmnopqrstuv');
+  assert.equal(feed.ownerName, 'Tom & Jerry');
   assert.equal(feed.entries.length, 2);
   const [first, second] = feed.entries;
   assert.equal(first.videoId, 'AAAAAAAAAAA');
@@ -106,6 +115,7 @@ test('validateDownloadOptions rejects mismatched formats', () => {
 test('buildYtdlpArgs maps quality, format and folder', () => {
   const args = buildYtdlpArgs({ video: video(), subscription: subscription({ quality: '1080', format: 'mp4' }) }, '/downloads', ['--cookies', 'c.txt']);
   assert.ok(args.includes('res:1080'));
+  assert.ok(args.includes('--progress'), 'progress lines must survive --print');
   assert.equal(args[args.indexOf('--js-runtimes') + 1], `node:${process.execPath}`);
   assert.ok(args.includes('--merge-output-format'));
   assert.ok(args[args.indexOf('-o') + 1].startsWith('/downloads/YouTube/Lab/'));
@@ -133,4 +143,30 @@ test('isNewer compares yt-dlp date versions', () => {
   assert.equal(isNewer('2026.10.26.1', '2026.10.26'), true);
   assert.equal(isNewer('2026.10.26', '2026.10.26'), false);
   assert.equal(isNewer('2025.12.01', '2026.01.01'), false);
+});
+
+test('an auto-download playlist claims videos still undecided under the channel', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-test-'));
+  const store = Store.open(dir);
+  const channel = subscription({ id: 'channel', mode: 'manual' });
+  const playlist = subscription({ id: 'playlist', kind: 'playlist', sourceId: 'PLxyz1234567890abcd', mode: 'auto', folder: 'Lab/Best of' });
+  store.data.subscriptions.push(channel, playlist);
+  store.data.videos = {
+    AAAAAAAAAAA: video({ id: 'AAAAAAAAAAA', subscriptionId: 'channel', status: 'available' }),
+    BBBBBBBBBBB: video({ id: 'BBBBBBBBBBB', subscriptionId: 'channel', status: 'ignored', note: null }),
+    CCCCCCCCCCC: video({ id: 'CCCCCCCCCCC', subscriptionId: 'channel', status: 'ignored', note: 'Short' }),
+    DDDDDDDDDDD: video({ id: 'DDDDDDDDDDD', subscriptionId: 'channel', status: 'done' }),
+  };
+  const library = new Library(store, loadConfig({ DATA_DIR: dir }), () => 'yt-dlp');
+  const entry = (id: string) => ({ videoId: id, title: 'T', channel: 'C', url: `https://www.youtube.com/watch?v=${id}`, thumbnail: '', publishedAt: null, isShort: false });
+  const ingest = (library as unknown as { ingest: (s: Subscription, e: unknown[], p: string) => number }).ingest.bind(library);
+
+  ingest(playlist, ['AAAAAAAAAAA', 'BBBBBBBBBBB', 'CCCCCCCCCCC', 'DDDDDDDDDDD'].map(entry), 'follow-mode');
+  const videos = store.data.videos;
+  assert.equal(videos.AAAAAAAAAAA.status, 'queued');
+  assert.equal(videos.AAAAAAAAAAA.subscriptionId, 'playlist');
+  assert.equal(videos.BBBBBBBBBBB.status, 'ignored', 'ignored by the user stays ignored');
+  assert.equal(videos.CCCCCCCCCCC.status, 'queued', 'skipped only by the channel filter');
+  assert.equal(videos.DDDDDDDDDDD.status, 'done');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

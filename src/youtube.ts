@@ -27,7 +27,17 @@ export interface FeedEntry {
 
 export interface Feed {
   title: string;
+  /** Channel that publishes the feed: the channel itself, or a playlist's owner. */
+  ownerChannelId: string | null;
+  ownerName: string | null;
   entries: FeedEntry[];
+}
+
+export interface ChannelPlaylist {
+  id: string;
+  title: string;
+  url: string;
+  thumbnail: string | null;
 }
 
 export function watchUrl(videoId: string): string {
@@ -117,7 +127,15 @@ export function parseFeed(xml: string): Feed {
       isShort: url.includes('/shorts/'),
     });
   }
-  return { title: feedTitle, entries };
+  const owner = head.match(/<author>([\s\S]*?)<\/author>/);
+  const ownerUri = owner ? tagText(owner[1], 'uri') : null;
+  const ownerId = ownerUri?.match(/\/channel\/(UC[\w-]{22})/);
+  return {
+    title: feedTitle,
+    ownerChannelId: ownerId ? ownerId[1] : null,
+    ownerName: owner ? tagText(owner[1], 'name') : null,
+    entries,
+  };
 }
 
 /**
@@ -292,5 +310,37 @@ export async function fetchBacklog(ref: SourceRef, ytdlpPath: string, limit: num
       isShort: entry.url?.includes('/shorts/') ?? false,
     });
   }
-  return { title: info.title ?? '', entries };
+  return { title: info.title ?? '', ownerChannelId: null, ownerName: null, entries };
+}
+
+interface FlatPlaylist {
+  id?: string;
+  title?: string;
+  url?: string;
+  thumbnails?: { url?: string }[];
+}
+
+/** Public playlists of a channel (its Playlists tab), through yt-dlp. */
+export async function fetchChannelPlaylists(channelId: string, ytdlpPath: string, limit: number): Promise<ChannelPlaylist[]> {
+  const result = await run(ytdlpPath, ['--flat-playlist', '--playlist-end', String(limit), '-J', `https://www.youtube.com/channel/${channelId}/playlists`], {
+    timeoutMs: 2 * 60_000,
+  });
+  if (result.code !== 0) {
+    throw new Error(lastError(result.stderr));
+  }
+  const info = JSON.parse(result.stdout) as { entries?: FlatPlaylist[] };
+  const playlists: ChannelPlaylist[] = [];
+  for (const entry of info.entries ?? []) {
+    if (entry.id === undefined || entry.id === '') {
+      continue;
+    }
+    const thumbnails = entry.thumbnails ?? [];
+    playlists.push({
+      id: entry.id,
+      title: entry.title ?? entry.id,
+      url: `https://www.youtube.com/playlist?list=${entry.id}`,
+      thumbnail: thumbnails.length > 0 ? thumbnails[thumbnails.length - 1].url ?? null : null,
+    });
+  }
+  return playlists;
 }

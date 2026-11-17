@@ -9,7 +9,9 @@ const FILEPATH_MARKER = 'YOUTUBAAR_FILE:';
 
 export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs: string[]): string[] {
   const { subscription, video } = job;
-  const args = ['--no-playlist', '--newline', '--embed-metadata', '--no-simulate', '--print', `after_move:${FILEPATH_MARKER}%(filepath)s`];
+  // --print (used to learn the final file path) implies --quiet; --progress brings the
+  // progress lines back so the UI can show a percentage.
+  const args = ['--no-playlist', '--newline', '--progress', '--embed-metadata', '--no-simulate', '--print', `after_move:${FILEPATH_MARKER}%(filepath)s`];
   // Recent yt-dlp needs a JavaScript runtime to solve YouTube's challenges; only Deno is
   // enabled by default, so point it at the Node running Youtubaar.
   args.push('--js-runtimes', `node:${process.execPath}`);

@@ -15,6 +15,11 @@ YouTube RSS feeds ──poll──▶ Youtubaar ──"download this"──▶ y
 
 - **Channels and playlists**: paste a channel URL, an `@handle`, a `/channel/UC…` URL,
   a playlist URL (`…/playlist?list=PL…`) or a raw channel/playlist id.
+- **A channel's playlists**: when adding a channel (or later, from its page with
+  *Playlists*), list its public playlists and follow any of them, each with its own
+  *Auto-download* switch. Playlists save into `<channel folder>/<playlist name>`.
+  If you pick from the channel but a playlist auto-downloads, a new video in that
+  playlist is downloaded even when the channel found it first.
 - **Pick or auto per subscription**: *Let me pick* puts new videos in the Inbox,
   *Download automatically* queues them straight away.
 - **Interface** organized like Sonarr / Radarr:
@@ -168,5 +173,6 @@ Everything the UI does is available over JSON:
 | POST | `/api/check` | checks every subscription |
 | GET | `/api/videos` | `status` (comma list), `subscription`, `q`, `limit`, `offset` |
 | POST | `/api/videos/actions` | `ids`, `action` (`download`/`ignore`/`restore`) |
+| GET | `/api/channels/:channelId/playlists` | a channel's playlists, with the ones followed |
 | GET | `/api/ytdlp` | installed and latest version |
 | POST | `/api/ytdlp/update` | installs the latest yt-dlp |

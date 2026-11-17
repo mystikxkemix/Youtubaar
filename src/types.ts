@@ -34,6 +34,9 @@ export interface Subscription extends DownloadOptions {
   url: string;
   /** Channel avatar or playlist cover; undefined until first looked up, null when none was found. */
   avatar?: string | null;
+  /** For playlists: the channel that owns it, read from the feed. */
+  ownerChannelId?: string | null;
+  ownerName?: string | null;
   /** Folder relative to the download root. */
   folder: string;
   mode: Mode;
