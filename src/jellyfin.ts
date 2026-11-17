@@ -1,5 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { fileSlug } from './rules';
 import type { Subscription } from './types';
 
 /**
@@ -7,12 +8,12 @@ import type { Subscription } from './types';
  * each video an episode with a Kodi-style .nfo next to it.
  *
  *   <folder>/tvshow.nfo, poster.jpg
- *   <folder>/Season_2026/2026-11-17_Title_id.mp4
- *                        2026-11-17_Title_id.nfo
- *                        2026-11-17_Title_id-thumb.jpg
+ *   <folder>/Season_2026/Show_S2026E111701_Title.mp4
+ *                        Show_S2026E111701_Title.nfo
+ *                        Show_S2026E111701_Title-thumb.jpg
  *
- * Jellyfin reads the date-prefixed names as daily episodes, and the .nfo files give it
- * titles, descriptions and air dates without querying TV databases.
+ * Files follow Kodi's episode naming (Show_SxxEyy_Title), and the .nfo files give
+ * Jellyfin and Kodi titles, descriptions and air dates without querying TV databases.
  */
 
 /** Fields yt-dlp prints after a download (see buildYtdlpArgs). */
@@ -129,40 +130,125 @@ export async function ensureShowMetadata(showDir: string, subscription: Subscrip
   }
 }
 
-/**
- * Writes the episode .nfo next to the downloaded file. The index within the day comes
- * from the .nfo files already in the season folder, so re-downloads keep their number.
- */
-export async function writeEpisodeMetadata(mediaPath: string, meta: VideoMetadata, subscription: Subscription, position?: number | null): Promise<string> {
-  const directory = path.dirname(mediaPath);
-  const base = path.basename(mediaPath, path.extname(mediaPath));
-  const aired = airDate(meta) ?? new Date().toISOString().slice(0, 10);
-  const nfoPath = path.join(directory, `${base}.nfo`);
+/** Season and episode of an .nfo already in a season folder. */
+interface ExistingEpisode {
+  videoId: string | null;
+  aired: string | null;
+  episode: number;
+}
 
-  // A playlist is one season, its episodes numbered by their place in the playlist.
-  if (subscription.kind === 'playlist' && position) {
-    await fs.writeFile(nfoPath, episodeNfo(meta, subscription.name, 1, position));
-    return nfoPath;
-  }
-
-  const season = Number(aired.slice(0, 4));
-
-  const sameDay: string[] = [];
-  for (const name of await fs.readdir(directory)) {
-    if (name.endsWith('.nfo') && name.startsWith(aired) && name !== `${base}.nfo`) {
-      sameDay.push(name);
-    }
-  }
-  let index = sameDay.length + 1;
-  // Keep the number of an episode written before (e.g. after a retry).
+async function readSeasonEpisodes(seasonDir: string): Promise<ExistingEpisode[]> {
+  const episodes: ExistingEpisode[] = [];
+  let names: string[] = [];
   try {
-    const previous = (await fs.readFile(nfoPath, 'utf8')).match(/<episode>(\d+)<\/episode>/);
-    if (previous) {
-      index = Number(previous[1]) % 100;
-    }
+    names = await fs.readdir(seasonDir);
   } catch {
-    // First time for this episode.
+    return episodes;
   }
-  await fs.writeFile(nfoPath, episodeNfo(meta, subscription.name, season, episodeNumber(aired, index)));
-  return nfoPath;
+  for (const name of names) {
+    if (!name.endsWith('.nfo')) {
+      continue;
+    }
+    try {
+      const xml = await fs.readFile(path.join(seasonDir, name), 'utf8');
+      const episode = xml.match(/<episode>(\d+)<\/episode>/);
+      if (episode) {
+        episodes.push({
+          videoId: xml.match(/<uniqueid type="youtube"[^>]*>([^<]+)<\/uniqueid>/)?.[1] ?? null,
+          aired: xml.match(/<aired>([^<]+)<\/aired>/)?.[1] ?? null,
+          episode: Number(episode[1]),
+        });
+      }
+    } catch {
+      // Unreadable .nfo: ignore it.
+    }
+  }
+  return episodes;
+}
+
+export interface EpisodePlan {
+  season: number;
+  episode: number;
+  /** Season folder name, e.g. "Season_2026" or "Season_01". */
+  seasonFolder: string;
+}
+
+/**
+ * Season and episode for a video. Playlists: season 1, episode = place in the playlist.
+ * Channels: season = upload year, episode = MMDD + index of the day; a video already
+ * numbered in that season keeps its number (retries, re-organizing).
+ */
+export async function planEpisode(showDir: string, meta: VideoMetadata, subscription: Subscription, position?: number | null): Promise<EpisodePlan> {
+  if (subscription.kind === 'playlist' && position) {
+    return { season: 1, episode: position, seasonFolder: PLAYLIST_SEASON_FOLDER };
+  }
+  const aired = airDate(meta) ?? new Date().toISOString().slice(0, 10);
+  const season = Number(aired.slice(0, 4));
+  const seasonFolder = `Season_${season}`;
+  const existing = await readSeasonEpisodes(path.join(showDir, seasonFolder));
+  const same = existing.find((entry) => entry.videoId === meta.id);
+  if (same !== undefined) {
+    return { season, episode: same.episode, seasonFolder };
+  }
+  let lastIndex = 0;
+  for (const entry of existing) {
+    if (entry.aired === aired) {
+      lastIndex = Math.max(lastIndex, entry.episode % 100);
+    }
+  }
+  return { season, episode: episodeNumber(aired, lastIndex + 1), seasonFolder };
+}
+
+/**
+ * Kodi-style episode name without spaces or special characters:
+ * "mistermv_S2026E112401_Le_mystere_de_la_partie_de_bridge" or "Zelda_OoT_S01E02_Bides_et_musiques".
+ */
+export function kodiBaseName(showName: string, season: number, episode: number, title: string): string {
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return [fileSlug(showName, 60), `S${pad(season)}E${pad(episode)}`, fileSlug(title, 100)].filter((part) => part !== '').join('_');
+}
+
+/**
+ * Puts a downloaded video in its Kodi place: season folder, Kodi name for the video,
+ * its "-thumb.jpg" and its .nfo. Returns the video's new path.
+ * thumbnail: the image to use when none sits next to the file yet (e.g. older downloads).
+ */
+export async function placeEpisode(
+  mediaPath: string,
+  showDir: string,
+  meta: VideoMetadata,
+  subscription: Subscription,
+  position?: number | null,
+  thumbnailUrl?: string | null,
+): Promise<string> {
+  const plan = await planEpisode(showDir, meta, subscription, position);
+  const seasonDir = path.join(showDir, plan.seasonFolder);
+  await fs.mkdir(seasonDir, { recursive: true });
+
+  const extension = path.extname(mediaPath);
+  const oldStem = path.join(path.dirname(mediaPath), path.basename(mediaPath, extension));
+  const base = path.join(seasonDir, kodiBaseName(subscription.name, plan.season, plan.episode, meta.title ?? meta.id));
+  const target = `${base}${extension}`;
+  if (target !== mediaPath) {
+    await fs.rename(mediaPath, target);
+  }
+
+  const thumbTarget = `${base}-thumb.jpg`;
+  if (`${oldStem}-thumb.jpg` !== thumbTarget && (await exists(`${oldStem}-thumb.jpg`))) {
+    await fs.rename(`${oldStem}-thumb.jpg`, thumbTarget);
+  } else if (thumbnailUrl && !(await exists(thumbTarget))) {
+    try {
+      const response = await fetch(thumbnailUrl, { signal: AbortSignal.timeout(20_000) });
+      if (response.ok) {
+        await fs.writeFile(thumbTarget, Buffer.from(await response.arrayBuffer()));
+      }
+    } catch {
+      // No episode image: Jellyfin extracts a frame instead.
+    }
+  }
+  if (`${oldStem}.nfo` !== `${base}.nfo` && (await exists(`${oldStem}.nfo`))) {
+    await fs.rm(`${oldStem}.nfo`);
+  }
+  await fs.writeFile(`${base}.nfo`, episodeNfo(meta, subscription.name, plan.season, plan.episode));
+  return target;
 }

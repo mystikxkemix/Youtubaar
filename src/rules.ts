@@ -92,6 +92,20 @@ export function normalizeFolder(folder: string): string {
   return safe.join('/');
 }
 
+/**
+ * Like safeName, for one part of a file name: dots become "_" too, and long text is cut
+ * at a word boundary ("Room... With" -> "Room_With").
+ */
+export function fileSlug(text: string, maxLength: number): string {
+  let slug = safeName(text).replace(/\.+/g, '_').replace(/_+/g, '_').replace(/^[_-]+|[_-]+$/g, '');
+  if (slug.length > maxLength) {
+    const cut = slug.slice(0, maxLength);
+    const boundary = cut.lastIndexOf('_');
+    slug = (boundary > maxLength / 2 ? cut.slice(0, boundary) : cut).replace(/[_-]+$/g, '');
+  }
+  return slug;
+}
+
 /** Folder name derived from a channel or playlist title. */
 export function folderFromName(name: string): string {
   return safeName(name) || 'YouTube';

@@ -454,6 +454,17 @@ pages.channel = async (id) => {
     subscription.kind === 'channel'
       ? button('Playlists', { icon: 'playlist', small: true, onclick: () => { state.channelTab = 'playlists'; state.selected.clear(); render(); } })
       : subscription.ownerChannelId ? button(`More playlists from ${subscription.ownerName ?? 'this channel'}`, { icon: 'playlist', small: true, onclick: () => openPlaylistsDialog(subscription) }) : null,
+    subscription.jellyfin && (counts.done ?? 0) > 0 ? button('Organize for Jellyfin', {
+      icon: 'folder',
+      small: true,
+      title: 'Move downloaded videos into season folders with Kodi names, .nfo files and thumbnails',
+      busy: async () => {
+        toast('Organizing downloads for Jellyfin…');
+        const { organized, failed } = await api(`/api/subscriptions/${id}/organize`, { method: 'POST' });
+        toast(failed.length === 0 ? `Organized ${plural(organized, 'video')}` : `Organized ${organized}, ${failed.length} failed: ${failed[0]}`, failed.length > 0);
+        await refresh();
+      },
+    }) : null,
     button('Edit', { icon: 'edit', small: true, onclick: () => openEditDialog(subscription) }),
     button('Delete', { icon: 'trash', small: true, variant: 'danger', onclick: () => confirmDelete(subscription) }),
   ]);

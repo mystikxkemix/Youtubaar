@@ -157,6 +157,8 @@ export function createServer(config: Config, library: Library, downloaderName: s
 
   route('POST', '/api/subscriptions/([\\w-]+)/backlog', async ({ params }) => ({ added: await library.loadBacklog(params[0]) }));
 
+  route('POST', '/api/subscriptions/([\\w-]+)/organize', async ({ params }) => library.organizeForJellyfin(params[0]));
+
   route('POST', '/api/check', async () => ({ added: await library.checkAll() }));
 
   route('GET', '/api/videos', ({ query }) =>
