@@ -4,17 +4,32 @@ import type { Video } from '../types';
 import type { DownloadJob, Downloader, UpdateCallback } from './types';
 
 const OUTPUT_TEMPLATE = '%(upload_date>%Y-%m-%d)s - %(title)s [%(id)s].%(ext)s';
-const PROGRESS_INTERVAL_MS = 2_000;
+const PROGRESS_INTERVAL_MS = 1_000;
 const FILEPATH_MARKER = 'YOUTUBAAR_FILE:';
+const FORMATS_MARKER = 'YOUTUBAAR_FORMATS:';
+const PROGRESS_MARKER = 'YOUTUBAAR_PROGRESS:';
 
 export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs: string[]): string[] {
   const { subscription, video } = job;
-  // --print (used to learn the final file path) implies --quiet; --progress brings the
-  // progress lines back so the UI can show a percentage.
-  const args = ['--no-playlist', '--newline', '--progress', '--embed-metadata', '--no-simulate', '--print', `after_move:${FILEPATH_MARKER}%(filepath)s`];
-  // Recent yt-dlp needs a JavaScript runtime to solve YouTube's challenges; only Deno is
-  // enabled by default, so point it at the Node running Youtubaar.
-  args.push('--js-runtimes', `node:${process.execPath}`);
+  const args = [
+    '--no-playlist',
+    '--newline',
+    '--embed-metadata',
+    '--no-simulate',
+    // Final file path, reported once the file is in place.
+    '--print', `after_move:${FILEPATH_MARKER}%(filepath)s`,
+    // The streams about to be downloaded (video + audio) and their sizes when YouTube
+    // gives them, so progress covers the whole download instead of restarting per stream.
+    // Each stream is printed as an object: plain lists would drop unknown sizes and
+    // shift the others onto the wrong stream.
+    '--print', `before_dl:${FORMATS_MARKER}%(format_id)s|%(filesize)s|%(filesize_approx)s|%(requested_formats.:.{format_id,filesize,filesize_approx})j`,
+    // --print implies --quiet; --progress keeps progress lines, in a parseable template.
+    '--progress',
+    '--progress-template', `download:${PROGRESS_MARKER}%(info.format_id)s:%(progress.downloaded_bytes)s:%(progress.total_bytes)s:%(progress.total_bytes_estimate)s`,
+    // Recent yt-dlp needs a JavaScript runtime to solve YouTube's challenges; only Deno is
+    // enabled by default, so point it at the Node running Youtubaar.
+    '--js-runtimes', `node:${process.execPath}`,
+  ];
 
   if (subscription.downloadType === 'audio') {
     args.push('-f', 'ba/b', '-x', '--audio-format', subscription.format, '--audio-quality', '0', '--embed-thumbnail');
@@ -32,6 +47,109 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
   return args;
 }
 
+function toBytes(value: unknown): number | null {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  return value !== null && value !== undefined && value !== 'NA' && Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function parseList(json: string): unknown[] {
+  try {
+    const parsed: unknown = JSON.parse(json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Turns yt-dlp's per-stream progress into one percentage for the whole download.
+ * A video is usually two streams (video, then audio), each going from 0 to 100%;
+ * reporting them raw makes the bar fill, drop back and fill again.
+ * Fragmented streams (HLS) have no size upfront, only a live estimate, so each
+ * stream's size is the best figure known so far.
+ */
+export class ProgressTracker {
+  private streams: string[] = [];
+  private readonly announced = new Map<string, number>();
+  private readonly exact = new Map<string, number>();
+  private readonly estimated = new Map<string, number>();
+  private readonly downloaded = new Map<string, number>();
+  private percent = 0;
+
+  /** Feeds one output line; returns the new percentage when the line was progress. */
+  line(line: string): number | null {
+    if (line.startsWith(FORMATS_MARKER)) {
+      this.readFormats(line.slice(FORMATS_MARKER.length));
+      return null;
+    }
+    if (!line.startsWith(PROGRESS_MARKER)) {
+      return null;
+    }
+    const [formatId, downloaded, total, estimate] = line.slice(PROGRESS_MARKER.length).split(':');
+    if (!this.streams.includes(formatId)) {
+      this.streams.push(formatId);
+    }
+    this.downloaded.set(formatId, Math.max(toBytes(downloaded) ?? 0, this.downloaded.get(formatId) ?? 0));
+    const exact = toBytes(total);
+    if (exact !== null) {
+      this.exact.set(formatId, exact);
+    }
+    const estimated = toBytes(estimate);
+    if (estimated !== null) {
+      this.estimated.set(formatId, estimated);
+    }
+    // 100% is only reported once the file is merged and moved; never go backwards.
+    this.percent = Math.max(this.percent, Math.min(99, Math.floor(this.fraction() * 100)));
+    return this.percent;
+  }
+
+  private readFormats(payload: string): void {
+    const [formatId, filesize, approx, streams] = payload.split('|');
+    const requested = parseList(streams ?? '[]') as { format_id?: unknown; filesize?: unknown; filesize_approx?: unknown }[];
+    if (requested.length === 0) {
+      this.streams = [formatId];
+      const size = toBytes(filesize) ?? toBytes(approx);
+      if (size !== null) {
+        this.announced.set(formatId, size);
+      }
+      return;
+    }
+    this.streams = [];
+    for (const stream of requested) {
+      const id = String(stream.format_id);
+      this.streams.push(id);
+      const size = toBytes(stream.filesize) ?? toBytes(stream.filesize_approx);
+      if (size !== null) {
+        this.announced.set(id, size);
+      }
+    }
+  }
+
+  private sizeOf(formatId: string): number | null {
+    return this.exact.get(formatId) ?? this.announced.get(formatId) ?? this.estimated.get(formatId) ?? null;
+  }
+
+  private fraction(): number {
+    const sizes = this.streams.map((id) => this.sizeOf(id));
+    if (sizes.every((size) => size !== null)) {
+      let done = 0;
+      let total = 0;
+      this.streams.forEach((id, index) => {
+        total += sizes[index] as number;
+        done += Math.min(this.downloaded.get(id) ?? 0, sizes[index] as number);
+      });
+      return total > 0 ? done / total : 0;
+    }
+    // A stream's size is still unknown: give each stream an equal share.
+    let sum = 0;
+    this.streams.forEach((id, index) => {
+      const size = sizes[index];
+      sum += size === null ? 0 : Math.min(1, (this.downloaded.get(id) ?? 0) / size);
+    });
+    return sum / this.streams.length;
+  }
+}
+
 /** Runs yt-dlp locally; used when there is no MeTube, or to bypass it. */
 export class YtdlpDownloader implements Downloader {
   readonly name = 'yt-dlp';
@@ -46,8 +164,10 @@ export class YtdlpDownloader implements Downloader {
 
   async start(job: DownloadJob): Promise<void> {
     const videoId = job.video.id;
+    const tracker = new ProgressTracker();
     let filename: string | null = null;
     let lastReport = 0;
+    let lastPercent = -1;
     this.onUpdate(videoId, { status: 'downloading', progress: 0 });
 
     const result = await run(this.ytdlpPath(), buildYtdlpArgs(job, this.downloadDir, this.extraArgs), {
@@ -56,11 +176,12 @@ export class YtdlpDownloader implements Downloader {
           filename = line.slice(FILEPATH_MARKER.length);
           return;
         }
-        const progress = line.match(/^\[download\]\s+([\d.]+)%/);
+        const percent = tracker.line(line);
         const now = Date.now();
-        if (progress !== null && now - lastReport >= PROGRESS_INTERVAL_MS) {
+        if (percent !== null && percent !== lastPercent && now - lastReport >= PROGRESS_INTERVAL_MS) {
           lastReport = now;
-          this.onUpdate(videoId, { status: 'downloading', progress: Math.round(Number.parseFloat(progress[1])) });
+          lastPercent = percent;
+          this.onUpdate(videoId, { status: 'downloading', progress: percent });
         }
       },
     });

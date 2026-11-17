@@ -7,7 +7,7 @@ import { Library } from '../src/library';
 import { Store } from '../src/store';
 import { test } from 'node:test';
 import { indexHistory } from '../src/downloaders/metube';
-import { buildYtdlpArgs } from '../src/downloaders/ytdlp';
+import { buildYtdlpArgs, ProgressTracker } from '../src/downloaders/ytdlp';
 import { filterReason, normalizeFolder, validateDownloadOptions } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
 import { parseFeed, parseSourceInput, videoIdFromUrl } from '../src/youtube';
@@ -169,4 +169,32 @@ test('an auto-download playlist claims videos still undecided under the channel'
   assert.equal(videos.CCCCCCCCCCC.status, 'queued', 'skipped only by the channel filter');
   assert.equal(videos.DDDDDDDDDDD.status, 'done');
   fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('ProgressTracker reports one rising percentage across the video and audio streams', () => {
+  const tracker = new ProgressTracker();
+  assert.equal(tracker.line('YOUTUBAAR_FORMATS:399+251|NA|NA|[{"format_id": "399", "filesize": 4000}, {"format_id": "251", "filesize": 1000, "filesize_approx": 1001}]'), null);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:399:2000:4000:NA'), 40);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:399:4000:4000:NA'), 80);
+  // The audio stream starts at 0 bytes: the overall figure must not drop.
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:251:0:1000:NA'), 80);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:251:500:1000:NA'), 90);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:251:1000:1000:NA'), 99, '100% waits for the merge');
+  assert.equal(tracker.line('[download] something else'), null);
+});
+
+test('ProgressTracker uses the live estimate of a fragmented stream with no size upfront', () => {
+  // Real case: HLS video 616 has no size, only the audio does (1 MB); the video is ~20 MB.
+  const tracker = new ProgressTracker();
+  tracker.line('YOUTUBAAR_FORMATS:616+251|NA|1021811|[{"format_id": "616"}, {"format_id": "251", "filesize": 1021811, "filesize_approx": 1021807}]');
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:616:7124387:NA:19800297.0'), 34);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:616:12137025:NA:18199393.5'), 63);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:616:19499981:NA:21263769.8'), 87);
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:251:64512:1021811:NA'), 87);
+});
+
+test('ProgressTracker handles a single stream', () => {
+  const tracker = new ProgressTracker();
+  tracker.line('YOUTUBAAR_FORMATS:18|5000|NA|[]');
+  assert.equal(tracker.line('YOUTUBAAR_PROGRESS:18:2500:5000:NA'), 50);
 });

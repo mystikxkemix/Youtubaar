@@ -214,6 +214,9 @@ td.num { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .mini-thumb { width: 96px; aspect-ratio: 16 / 9; border-radius: var(--r-sm); object-fit: cover; background: var(--surface-2); flex-shrink: 0; }
 .bar { position: relative; width: 160px; height: 6px; border-radius: 3px; background: var(--ring-track); overflow: hidden; }
 .bar > span { position: absolute; inset: 0 auto 0 0; background: var(--active); border-radius: 3px; transition: width .6s ease; }
+.row .title .progress-cell, .card .text .progress-cell { margin-top: 4px; }
+.row .title .bar, .card .text .bar { width: 100%; max-width: 220px; }
+.playlists-panel .pl-list { max-height: none; }
 .progress-cell { display: flex; align-items: center; gap: 10px; font-variant-numeric: tabular-nums; font-size: 13px; color: var(--text-2); }
 
 /* ---------- Subscription hero ---------- */
