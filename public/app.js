@@ -284,8 +284,17 @@ function ring(subscription, size, options = {}) {
 
 /* ---------- Shared pieces ---------- */
 
+/** Download bar with its percentage; "Finishing" while yt-dlp merges and tags the file. */
+function progressBar(video) {
+  const percent = video.progress ?? 0;
+  return el('div', { class: 'progress-cell' }, [
+    el('div', { class: 'bar' }, el('span', { style: { width: `${percent}%` } })),
+    el('span', { text: percent >= 99 ? 'Finishing' : `${percent}%` }),
+  ]);
+}
+
 function statusLabel(video) {
-  const text = video.status === 'downloading' && video.progress ? `${video.progress}%` : STATUS_TEXT[video.status];
+  const text = video.status === 'downloading' && video.progress ? (video.progress >= 99 ? 'Finishing' : `${video.progress}%`) : STATUS_TEXT[video.status];
   return el('span', { class: `status ${video.status}`, text });
 }
 
@@ -442,7 +451,9 @@ pages.channel = async (id) => {
       toast(subscription.enabled ? 'Paused: no more checks until you resume' : 'Resumed');
       await refresh();
     } }),
-    subscription.kind === 'channel' ? button('Playlists', { icon: 'playlist', small: true, onclick: () => openPlaylistsDialog(subscription) }) : null,
+    subscription.kind === 'channel'
+      ? button('Playlists', { icon: 'playlist', small: true, onclick: () => { state.channelTab = 'playlists'; state.selected.clear(); render(); } })
+      : subscription.ownerChannelId ? button(`More playlists from ${subscription.ownerName ?? 'this channel'}`, { icon: 'playlist', small: true, onclick: () => openPlaylistsDialog(subscription) }) : null,
     button('Edit', { icon: 'edit', small: true, onclick: () => openEditDialog(subscription) }),
     button('Delete', { icon: 'trash', small: true, variant: 'danger', onclick: () => confirmDelete(subscription) }),
   ]);
@@ -474,15 +485,33 @@ pages.channel = async (id) => {
     ]),
   ]);
 
+  const showPlaylists = subscription.kind === 'channel' && state.channelTab === 'playlists';
+  const followedPlaylists = state.subscriptions.filter((s) => s.kind === 'playlist' && s.ownerChannelId === subscription.sourceId).length;
   const toolbar = el('div', { class: 'toolbar' }, [
     segmented(CHANNEL_TABS.map((candidate) => ({
       value: candidate.key,
       label: candidate.label,
       count: candidate.statuses.length === 0 ? subscription.total : candidate.statuses.reduce((sum, status) => sum + (counts[status] ?? 0), 0),
-    })), tab.key, (value) => { state.channelTab = value; state.selected.clear(); render(); }),
+    })), showPlaylists ? '' : tab.key, (value) => { state.channelTab = value; state.selected.clear(); render(); }),
+    subscription.kind === 'channel'
+      ? segmented([{ value: 'playlists', icon: 'playlist', label: 'Playlists', count: followedPlaylists || undefined, title: 'Follow this channel\'s playlists' }], showPlaylists ? 'playlists' : '', () => { state.channelTab = 'playlists'; state.selected.clear(); render(); })
+      : null,
     el('span', { class: 'spacer' }),
-    segmented([{ value: 'list', icon: 'list', title: 'List' }, { value: 'grid', icon: 'grid', title: 'Grid' }], prefs.get('channelView'), (value) => { prefs.set('channelView', value); render(); }),
+    showPlaylists ? null : segmented([{ value: 'list', icon: 'list', title: 'List' }, { value: 'grid', icon: 'grid', title: 'Grid' }], prefs.get('channelView'), (value) => { prefs.set('channelView', value); render(); }),
   ]);
+
+  if (showPlaylists) {
+    const context = playlistContext(subscription);
+    const picker = playlistPicker(context.channelId, {
+      live: true,
+      follow: (playlist, auto) => api('/api/subscriptions', { method: 'POST', body: playlistBody(playlist, context.base, auto) }),
+      onfollowed: () => render(),
+    });
+    return [hero, toolbar, el('section', { class: 'panel playlists-panel' }, [
+      el('p', { class: 'note', text: `New playlists use this channel's format and save into ${context.base.folder || 'the download folder'}/<playlist name>.` }),
+      picker.node,
+    ])];
+  }
 
   if (videos.length === 0) {
     return [hero, toolbar, emptyState(tab.key === 'all' ? 'No videos found yet' : `No ${tab.label.toLowerCase()} videos`, tab.key === 'all' ? 'Check now, or find older videos to list the channel history.' : 'Pick another tab to see the rest.')];
@@ -547,7 +576,9 @@ function videoRow(video) {
     el('img', { class: 'mini-thumb', src: video.thumbnail, alt: '', loading: 'lazy' }),
     el('div', { class: 'title' }, [
       el('a', { href: video.url, target: '_blank', rel: 'noopener', text: video.title, title: video.title }),
-      el('small', { class: video.status === 'failed' ? 'error' : '', text: note || [video.publishedAt ? longDate(video.publishedAt) : null, video.isShort ? 'Short' : null].filter(Boolean).join(', ') }),
+      video.status === 'downloading'
+        ? progressBar(video)
+        : el('small', { class: video.status === 'failed' ? 'error' : '', text: note || [video.publishedAt ? longDate(video.publishedAt) : null, video.isShort ? 'Short' : null].filter(Boolean).join(', ') }),
     ]),
     statusLabel(video),
     el('div', { class: 'actions' }, videoActions(video, true)),
@@ -572,7 +603,7 @@ function videoCard(video, showChannel) {
           showChannel && video.publishedAt ? ', ' : null,
           video.publishedAt ? relativeTime(video.publishedAt) : null,
         ]),
-        video.status !== 'available' ? statusLabel(video) : null,
+        video.status === 'downloading' ? progressBar(video) : video.status !== 'available' ? statusLabel(video) : null,
       ]),
     ]),
     el('div', { class: 'card-actions', style: showChannel ? {} : { paddingLeft: '0' } }, videoActions(video, false)),
@@ -671,9 +702,7 @@ pages.activity = async (tab) => {
   if (!isHistory) {
     return [head, toolbar, activityTable(items, [
       { label: 'Video', render: (video) => titleCell(video) },
-      { label: 'Progress', render: (video) => video.status === 'downloading'
-        ? el('div', { class: 'progress-cell' }, [el('div', { class: 'bar' }, el('span', { style: { width: `${video.progress ?? 0}%` } })), `${video.progress ?? 0}%`])
-        : statusLabel(video) },
+      { label: 'Progress', render: (video) => video.status === 'downloading' ? progressBar(video) : statusLabel(video) },
       { label: 'Requested', class: 'num muted', render: (video) => relativeTime(video.sentAt ?? video.updatedAt) },
       { label: '', render: (video) => el('div', { class: 'actions' }, videoActions(video, true)) },
     ])];
@@ -954,27 +983,43 @@ function playlistBody(playlist, base, auto) {
   };
 }
 
-function openPlaylistsDialog(subscription) {
-  const base = {
-    folder: subscription.folder,
-    downloadType: subscription.downloadType,
-    format: subscription.format,
-    quality: subscription.quality,
-    titleInclude: subscription.titleInclude,
-    titleExclude: subscription.titleExclude,
-    skipShorts: subscription.skipShorts,
-    initial: 'available',
+/**
+ * Where a subscription's sibling playlists come from and what they inherit: for a channel,
+ * its own settings and folder; for a playlist, its owner channel and the parent folder.
+ */
+function playlistContext(subscription) {
+  const isChannel = subscription.kind === 'channel';
+  const owner = isChannel ? subscription : state.subscriptions.find((s) => s.kind === 'channel' && s.sourceId === subscription.ownerChannelId);
+  const parentFolder = subscription.folder.split('/').slice(0, -1).join('/');
+  return {
+    channelId: isChannel ? subscription.sourceId : subscription.ownerChannelId,
+    name: isChannel ? subscription.name : subscription.ownerName ?? 'Channel',
+    avatar: owner?.avatar ?? null,
+    base: {
+      folder: owner?.folder ?? (parentFolder || folderName(subscription.ownerName ?? 'YouTube')),
+      downloadType: subscription.downloadType,
+      format: subscription.format,
+      quality: subscription.quality,
+      titleInclude: subscription.titleInclude,
+      titleExclude: subscription.titleExclude,
+      skipShorts: subscription.skipShorts,
+      initial: 'available',
+    },
   };
-  const picker = playlistPicker(subscription.sourceId, {
+}
+
+function openPlaylistsDialog(subscription) {
+  const context = playlistContext(subscription);
+  const picker = playlistPicker(context.channelId, {
     live: true,
-    follow: (playlist, auto) => api('/api/subscriptions', { method: 'POST', body: playlistBody(playlist, base, auto) }),
+    follow: (playlist, auto) => api('/api/subscriptions', { method: 'POST', body: playlistBody(playlist, context.base, auto) }),
     // Re-list so the new playlist shows as followed, with a working auto-download switch.
     onfollowed: () => openPlaylistsDialog(subscription),
   });
   showDialog(el('form', { onsubmit: (event) => { event.preventDefault(); closeDialog(); } }, [
-    el('div', { class: 'head' }, [ring(subscription, 64, { plain: true }), el('div', {}, [
-      el('h2', { text: `${subscription.name} playlists` }),
-      el('p', { text: `New playlists use this channel's format and save into ${subscription.folder || 'the download folder'}/<playlist name>.` }),
+    el('div', { class: 'head' }, [ring({ name: context.name, avatar: context.avatar, enabled: true }, 64, { plain: true }), el('div', {}, [
+      el('h2', { text: `${context.name} playlists` }),
+      el('p', { text: `New playlists save into ${context.base.folder || 'the download folder'}/<playlist name>.` }),
     ])]),
     picker.node,
     el('div', { class: 'foot' }, [button('Done', { type: 'submit', variant: 'primary' })]),
@@ -1254,7 +1299,8 @@ function init() {
   refresh();
 
   setInterval(() => {
-    const busy = document.hidden || $('#dialog').open || document.activeElement?.tagName === 'SELECT';
+    const onPlaylists = state.route.page === 'channel' && state.channelTab === 'playlists';
+    const busy = document.hidden || $('#dialog').open || onPlaylists || document.activeElement?.tagName === 'SELECT';
     if (!busy) refresh();
   }, REFRESH_MS);
 }
