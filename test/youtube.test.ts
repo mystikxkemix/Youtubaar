@@ -10,7 +10,7 @@ import { indexHistory } from '../src/downloaders/metube';
 import { buildYtdlpArgs, ProgressTracker } from '../src/downloaders/ytdlp';
 import { filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
-import { parseFeed, parseSourceInput, videoIdFromUrl } from '../src/youtube';
+import { mergeListing, parseFeed, parseSourceInput, videoIdFromUrl } from '../src/youtube';
 import { isNewer } from '../src/ytdlpManager';
 
 const FEED = `<?xml version="1.0" encoding="UTF-8"?>
@@ -200,4 +200,51 @@ test('ProgressTracker handles a single stream', () => {
   const tracker = new ProgressTracker();
   tracker.line('YOUTUBAAR_FORMATS:18|5000|NA|[]');
   assert.equal(tracker.line('YOUTUBAAR_PROGRESS:18:2500:5000:NA'), 50);
+});
+
+test('a playlist takes over undecided videos its channel found first, and keeps their positions', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-test-'));
+  const store = Store.open(dir);
+  const channel = subscription({ id: 'channel', mode: 'manual' });
+  const playlist = subscription({ id: 'playlist', kind: 'playlist', sourceId: 'PLxyz1234567890abcd', mode: 'manual', folder: 'Lab_Best' });
+  store.data.subscriptions.push(channel, playlist);
+  store.data.videos = {
+    AAAAAAAAAAA: video({ id: 'AAAAAAAAAAA', subscriptionId: 'channel', status: 'available' }),
+    DDDDDDDDDDD: video({ id: 'DDDDDDDDDDD', subscriptionId: 'channel', status: 'done' }),
+  };
+  const library = new Library(store, loadConfig({ DATA_DIR: dir }), () => 'yt-dlp');
+  const entry = (id: string, position: number) => ({ videoId: id, title: 'T', channel: 'C', url: `https://www.youtube.com/watch?v=${id}`, thumbnail: '', publishedAt: null, isShort: false, position });
+  const ingest = (library as unknown as { ingest: (s: Subscription, e: unknown[], p: string) => number }).ingest.bind(library);
+
+  ingest(playlist, [entry('AAAAAAAAAAA', 1), entry('DDDDDDDDDDD', 2)], 'follow-mode');
+  assert.equal(store.data.videos.AAAAAAAAAAA.subscriptionId, 'playlist');
+  assert.equal(store.data.videos.AAAAAAAAAAA.status, 'available', 'a manual playlist only takes ownership');
+  assert.equal(store.data.videos.AAAAAAAAAAA.position, 1);
+  assert.equal(store.data.videos.DDDDDDDDDDD.subscriptionId, 'channel', 'downloaded videos stay where they are');
+
+  // The channel seeing the video again does not take it back.
+  ingest(channel, [entry('AAAAAAAAAAA', 0)], 'follow-mode');
+  assert.equal(store.data.videos.AAAAAAAAAAA.subscriptionId, 'playlist');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('Jellyfin show folders cannot nest inside another subscription folder', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-test-'));
+  const store = Store.open(dir);
+  store.data.subscriptions.push(subscription({ id: 'channel', folder: 'mistermv' }), subscription({ id: 'playlist', kind: 'playlist', sourceId: 'PLxyz1234567890abcd', folder: 'mistermv/Zelda' }));
+  const library = new Library(store, loadConfig({ DATA_DIR: dir }), () => 'yt-dlp');
+  assert.throws(() => library.updateSubscription('playlist', { jellyfin: true }), /cannot share or sit inside/);
+  assert.doesNotThrow(() => library.updateSubscription('playlist', { jellyfin: true, folder: 'mistermv_Zelda' }));
+  store.flush();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('mergeListing keeps listing positions and the feed dates', () => {
+  const merged = mergeListing(
+    [{ videoId: 'A', title: 'A', channel: '', url: '', thumbnail: '', publishedAt: null, isShort: false, position: 1 },
+     { videoId: 'B', title: 'B', channel: '', url: '', thumbnail: '', publishedAt: null, isShort: false, position: 2 }],
+    [{ videoId: 'B', title: 'B', channel: 'C', url: '', thumbnail: 't', publishedAt: '2026-11-16', isShort: false, position: 1 }],
+  );
+  assert.equal(merged[1].publishedAt, '2026-11-16');
+  assert.equal(merged[1].position, 2);
 });

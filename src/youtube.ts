@@ -23,6 +23,8 @@ export interface FeedEntry {
   thumbnail: string;
   publishedAt: string | null;
   isShort: boolean;
+  /** Position in the playlist (1 = first) when the source is a playlist. */
+  position?: number;
 }
 
 export interface Feed {
@@ -252,10 +254,22 @@ export async function fetchAvatar(ref: SourceRef): Promise<string | null> {
   }
 }
 
-/** Latest ~15 videos of the source, from its public RSS feed (no API key, cheap to poll). */
+/** Numbers playlist entries 1..n: feeds and listings of a playlist come in playlist order. */
+function withPositions(ref: SourceRef, feed: Feed): Feed {
+  if (ref.kind !== 'playlist') {
+    return feed;
+  }
+  return { ...feed, entries: feed.entries.map((entry, index) => ({ ...entry, position: index + 1 })) };
+}
+
+/**
+ * Latest ~15 videos of a channel, from its public RSS feed (no API key, cheap to poll).
+ * For a playlist the feed holds its first 15 videos in playlist order, so videos added
+ * at the end of a long playlist need fetchBacklog.
+ */
 export async function fetchFeed(ref: SourceRef): Promise<Feed> {
   try {
-    return parseFeed(await fetchText(feedUrl(ref)));
+    return withPositions(ref, parseFeed(await fetchText(feedUrl(ref))));
   } catch (error) {
     const message = (error as Error).message;
     if (message.startsWith('HTTP 404')) {
@@ -310,7 +324,19 @@ export async function fetchBacklog(ref: SourceRef, ytdlpPath: string, limit: num
       isShort: entry.url?.includes('/shorts/') ?? false,
     });
   }
-  return { title: info.title ?? '', ownerChannelId: null, ownerName: null, entries };
+  return withPositions(ref, { title: info.title ?? '', ownerChannelId: null, ownerName: null, entries });
+}
+
+/**
+ * Whole playlist through yt-dlp, with the feed's dates and thumbnails where it has them
+ * (the flat listing has positions but rarely dates).
+ */
+export function mergeListing(listing: FeedEntry[], feed: FeedEntry[]): FeedEntry[] {
+  const fromFeed = new Map(feed.map((entry) => [entry.videoId, entry]));
+  return listing.map((entry) => {
+    const known = fromFeed.get(entry.videoId);
+    return known === undefined ? entry : { ...known, position: entry.position };
+  });
 }
 
 interface FlatPlaylist {

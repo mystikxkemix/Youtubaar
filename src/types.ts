@@ -46,6 +46,8 @@ export interface Subscription extends DownloadOptions {
   skipShorts: boolean;
   /** Save as a Jellyfin show: season folders, .nfo files and thumbnails (yt-dlp downloader). */
   jellyfin?: boolean;
+  /** Playlists: set once yt-dlp listed the whole playlist (the feed only shows the first 15). */
+  fullyListed?: boolean;
   enabled: boolean;
   createdAt: string;
   lastCheckedAt: string | null;
@@ -69,6 +71,8 @@ export interface Video {
   filename: string | null;
   /** When the download was handed to the downloader (used to match MeTube history). */
   sentAt: string | null;
+  /** Position in its playlist subscription (1 = first), for playlist-ordered episodes. */
+  position?: number | null;
   foundAt: string;
   updatedAt: string;
 }

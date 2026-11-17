@@ -78,3 +78,19 @@ test('tidyStem leaves only letters, digits, underscores and dashes', () => {
   assert.equal(tidyStem('2026-11-14_Cool_Down_Your_Room..._With_a_FRIDGE_NKeZ_HRk_O8'), '2026-11-14_Cool_Down_Your_Room_With_a_FRIDGE_NKeZ_HRk_O8');
   assert.equal(tidyStem('2026-11-12_What_Is_Food_Fortification_Y1vEGsnNYek'), '2026-11-12_What_Is_Food_Fortification_Y1vEGsnNYek');
 });
+
+test('a playlist is one season in playlist order', async () => {
+  const playlist: Subscription = { ...subscription, kind: 'playlist', sourceId: 'PLxyz1234567890abcd', name: 'Zelda OoT', folder: 'mistermv_Zelda_OoT' };
+  const args = buildYtdlpArgs({ video: { ...video, position: 3 }, subscription: playlist }, '/downloads', []);
+  assert.ok(args.includes('/downloads/mistermv_Zelda_OoT/Season_01/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s'));
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-pl-'));
+  const media = path.join(dir, '2026-11-13_Part_3_AAAAAAAAAAA.mp4');
+  fs.writeFileSync(media, '');
+  await writeEpisodeMetadata(media, meta, playlist, 3);
+  const xml = fs.readFileSync(media.replace('.mp4', '.nfo'), 'utf8');
+  assert.match(xml, /<season>1<\/season>/);
+  assert.match(xml, /<episode>3<\/episode>/);
+  assert.match(xml, /<showtitle>Zelda OoT<\/showtitle>/);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

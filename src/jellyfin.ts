@@ -30,6 +30,8 @@ export interface VideoMetadata {
 }
 
 export const SEASON_FOLDER = 'Season_%(upload_date>%Y)s';
+/** Playlists are a single season in playlist order. */
+export const PLAYLIST_SEASON_FOLDER = 'Season_01';
 
 export function escapeXml(text: string): string {
   return text
@@ -131,10 +133,18 @@ export async function ensureShowMetadata(showDir: string, subscription: Subscrip
  * Writes the episode .nfo next to the downloaded file. The index within the day comes
  * from the .nfo files already in the season folder, so re-downloads keep their number.
  */
-export async function writeEpisodeMetadata(mediaPath: string, meta: VideoMetadata, subscription: Subscription): Promise<string> {
+export async function writeEpisodeMetadata(mediaPath: string, meta: VideoMetadata, subscription: Subscription, position?: number | null): Promise<string> {
   const directory = path.dirname(mediaPath);
   const base = path.basename(mediaPath, path.extname(mediaPath));
   const aired = airDate(meta) ?? new Date().toISOString().slice(0, 10);
+  const nfoPath = path.join(directory, `${base}.nfo`);
+
+  // A playlist is one season, its episodes numbered by their place in the playlist.
+  if (subscription.kind === 'playlist' && position) {
+    await fs.writeFile(nfoPath, episodeNfo(meta, subscription.name, 1, position));
+    return nfoPath;
+  }
+
   const season = Number(aired.slice(0, 4));
 
   const sameDay: string[] = [];
@@ -143,7 +153,6 @@ export async function writeEpisodeMetadata(mediaPath: string, meta: VideoMetadat
       sameDay.push(name);
     }
   }
-  const nfoPath = path.join(directory, `${base}.nfo`);
   let index = sameDay.length + 1;
   // Keep the number of an episode written before (e.g. after a retry).
   try {

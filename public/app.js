@@ -509,7 +509,7 @@ pages.channel = async (id) => {
       onfollowed: () => render(),
     });
     return [hero, toolbar, el('section', { class: 'panel playlists-panel' }, [
-      el('p', { class: 'note', text: `New playlists use this channel's format and save into ${context.base.folder || 'the download folder'}/<playlist name>.` }),
+      el('p', { class: 'note', text: `New playlists use this channel's format and save into their own folder, ${playlistFolder(context.base.folder, 'Playlist name')}, as a separate show in Jellyfin.` }),
       picker.node,
     ])];
   }
@@ -989,12 +989,18 @@ function playlistPicker(channelId, options = {}) {
 }
 
 /** Settings a new playlist inherits from the channel it belongs to. */
+/** "YouTube/mistermv" + "Zelda OoT" -> "YouTube/mistermv_Zelda_OoT". */
+function playlistFolder(channelFolder, title) {
+  return channelFolder ? `${channelFolder}_${folderName(title)}` : folderName(title);
+}
+
 function playlistBody(playlist, base, auto) {
   return {
     ...base,
     url: playlist.url,
     mode: auto ? 'auto' : 'manual',
-    folder: `${base.folder || 'YouTube'}/${folderName(playlist.title)}`,
+    // Next to the channel's folder, never inside it: a playlist is its own show.
+    folder: playlistFolder(base.folder, playlist.title),
   };
 }
 
@@ -1035,7 +1041,7 @@ function openPlaylistsDialog(subscription) {
   showDialog(el('form', { onsubmit: (event) => { event.preventDefault(); closeDialog(); } }, [
     el('div', { class: 'head' }, [ring({ name: context.name, avatar: context.avatar, enabled: true }, 64, { plain: true }), el('div', {}, [
       el('h2', { text: `${context.name} playlists` }),
-      el('p', { text: `New playlists save into ${context.base.folder || 'the download folder'}/<playlist name>.` }),
+      el('p', { text: `New playlists save into their own folder, ${playlistFolder(context.base.folder, 'Playlist name')}.` }),
     ])]),
     picker.node,
     el('div', { class: 'foot' }, [button('Done', { type: 'submit', variant: 'primary' })]),
