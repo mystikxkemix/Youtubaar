@@ -1,15 +1,40 @@
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import { ensureShowMetadata, SEASON_FOLDER, writeEpisodeMetadata, type VideoMetadata } from '../jellyfin';
 import { lastError, run } from '../process';
 import type { Video } from '../types';
 import type { DownloadJob, Downloader, UpdateCallback } from './types';
 
-const OUTPUT_TEMPLATE = '%(upload_date>%Y-%m-%d)s - %(title)s [%(id)s].%(ext)s';
+/** "2026-11-17_Cool_Down_Your_Room_NKeZ_HRk_O8.mp4": with --restrict-filenames, no spaces or special characters. */
+const OUTPUT_TEMPLATE = '%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s';
 const PROGRESS_INTERVAL_MS = 1_000;
 const FILEPATH_MARKER = 'YOUTUBAAR_FILE:';
 const FORMATS_MARKER = 'YOUTUBAAR_FORMATS:';
 const PROGRESS_MARKER = 'YOUTUBAAR_PROGRESS:';
 const META_MARKER = 'YOUTUBAAR_META:';
+
+/**
+ * The file name stem without the leftovers --restrict-filenames allows inside a title
+ * ("Room..._With" -> "Room_With"): only letters, digits, "_" and "-" remain.
+ */
+export function tidyStem(stem: string): string {
+  return stem.replace(/[^A-Za-z0-9_-]+/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/** Renames the downloaded file (and its "-thumb.jpg") to the tidy stem; returns the new path. */
+async function tidyDownload(filePath: string): Promise<string> {
+  const directory = path.dirname(filePath);
+  const extension = path.extname(filePath);
+  const stem = path.basename(filePath, extension);
+  const tidy = tidyStem(stem);
+  if (tidy === stem || tidy === '') {
+    return filePath;
+  }
+  const target = path.join(directory, `${tidy}${extension}`);
+  await fs.rename(filePath, target);
+  await fs.rename(path.join(directory, `${stem}-thumb.jpg`), path.join(directory, `${tidy}-thumb.jpg`)).catch(() => undefined);
+  return target;
+}
 
 /** Whether this job is saved in the Jellyfin show layout. */
 export function usesJellyfin(job: DownloadJob): boolean {
@@ -20,6 +45,8 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
   const { subscription, video } = job;
   const args = [
     '--no-playlist',
+    // Titles in file names keep only ASCII letters, digits, "_", "-" and ".".
+    '--restrict-filenames',
     '--newline',
     '--embed-metadata',
     '--no-simulate',
@@ -218,6 +245,13 @@ export class YtdlpDownloader implements Downloader {
       throw new Error(lastError(result.stderr));
     }
     let note: string | null = null;
+    if (filename !== null) {
+      try {
+        filename = await tidyDownload(filename);
+      } catch {
+        // Keep yt-dlp's name if the rename fails; the download itself is fine.
+      }
+    }
     if (usesJellyfin(job)) {
       note = await this.writeJellyfinMetadata(job, filename, metadata);
     }

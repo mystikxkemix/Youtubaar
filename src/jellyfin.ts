@@ -7,9 +7,9 @@ import type { Subscription } from './types';
  * each video an episode with a Kodi-style .nfo next to it.
  *
  *   <folder>/tvshow.nfo, poster.jpg
- *   <folder>/Season 2026/2026-11-17 - Title [id].mp4
- *                        2026-11-17 - Title [id].nfo
- *                        2026-11-17 - Title [id]-thumb.jpg
+ *   <folder>/Season_2026/2026-11-17_Title_id.mp4
+ *                        2026-11-17_Title_id.nfo
+ *                        2026-11-17_Title_id-thumb.jpg
  *
  * Jellyfin reads the date-prefixed names as daily episodes, and the .nfo files give it
  * titles, descriptions and air dates without querying TV databases.
@@ -29,7 +29,7 @@ export interface VideoMetadata {
   tags?: string[] | null;
 }
 
-export const SEASON_FOLDER = 'Season %(upload_date>%Y)s';
+export const SEASON_FOLDER = 'Season_%(upload_date>%Y)s';
 
 export function escapeXml(text: string): string {
   return text

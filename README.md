@@ -96,10 +96,10 @@ upload year a season, each video an episode.
 ```
 <download folder>/<subscription folder>/
   tvshow.nfo, poster.jpg                       show title, channel avatar
-  Season 2026/
-    2026-11-17 - Title [id].mp4
-    2026-11-17 - Title [id].nfo                title, description, air date, tags
-    2026-11-17 - Title [id]-thumb.jpg          episode image
+  Season_2026/
+    2026-11-17_Title_id.mp4
+    2026-11-17_Title_id.nfo                title, description, air date, tags
+    2026-11-17_Title_id-thumb.jpg          episode image
 ```
 
 1. Mount the folder Jellyfin reads as Youtubaar's `/downloads`, e.g. on ZimaOS
@@ -183,7 +183,12 @@ npm test
 - **MeTube** receives `POST /add` with `download_type`, `quality`, `format`, `folder`
   and `auto_start: true`. Youtubaar then polls `GET /history` every 15 s to mark the
   video downloaded or failed. The same body works on older MeTube versions.
-- **yt-dlp** writes `<DOWNLOAD_DIR>/<folder>/<upload date> - <title> [<id>].<ext>`.
+- **Names** have no spaces or special characters: folders become slugs
+  (`Kurzgesagt – In a Nutshell` -> `Kurzgesagt_In_a_Nutshell`) and yt-dlp writes
+  `<DOWNLOAD_DIR>/<folder>/<upload date>_<title>_<id>.<ext>` with `--restrict-filenames`,
+  then dots left inside the title are turned into `_`. Display names (UI, Jellyfin)
+  keep the real titles.
+- **yt-dlp** downloads one video at a time by default.
   It is given the Node runtime (`--js-runtimes node`) to solve YouTube's JavaScript
   challenges. Downloads cut off by a restart are queued again.
 - **State** is one JSON file in `DATA_DIR`, written atomically. Back it up to keep

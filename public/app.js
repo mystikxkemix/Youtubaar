@@ -889,7 +889,7 @@ function settingsFields(initial, options = {}) {
 
 /** Same rule as the server: folder names cannot hold path separators or reserved characters. */
 function folderName(name) {
-  return name.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim() || 'Playlist';
+  return name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^A-Za-z0-9._-]+/g, '_').replace(/_+/g, '_').replace(/^[._-]+|[._-]+$/g, '') || 'Playlist';
 }
 
 /**

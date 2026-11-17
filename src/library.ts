@@ -441,6 +441,25 @@ export class Library {
     this.processQueue();
   }
 
+  /**
+   * Folders saved before safe names existed get them now, so new downloads never land
+   * in paths with spaces or special characters. Files already downloaded stay put.
+   */
+  normalizeFolders(): string[] {
+    const changed: string[] = [];
+    for (const subscription of this.subscriptions) {
+      const safe = normalizeFolder(subscription.folder);
+      if (safe !== subscription.folder) {
+        changed.push(`${subscription.folder} -> ${safe}`);
+        subscription.folder = safe;
+      }
+    }
+    if (changed.length > 0) {
+      this.store.save();
+    }
+    return changed;
+  }
+
   /** After a restart, local downloads that were cut off go back to the queue. */
   requeueInterrupted(): void {
     for (const video of Object.values(this.store.data.videos)) {
