@@ -51,21 +51,23 @@ Then open `http://<host>:8085`. Videos land in `./downloads/<subscription folder
 
 ## Install on ZimaOS
 
-ZimaOS is `linux/amd64` and its custom-app importer cannot build images, so build the
-image on the Mac and load it on the box:
+CI publishes `ghcr.io/mystikxkemix/youtubaar:latest` (linux/amd64) after the tests pass
+on `master`, plus a `sha-<commit>` tag per build. The package is private by default:
 
-1. Build and copy the image (replace the host with your ZimaOS address/user):
+1. Create a GitHub **classic** token with only `read:packages`, then on ZimaOS log in as
+   your user (ZimaOS's root filesystem is read-only, so root cannot store a login) and
+   pull with root pointing at that config:
    ```sh
-   docker buildx build --platform linux/amd64 -t youtubaar:latest --load .
-   docker save youtubaar:latest | gzip | ssh <user>@<zima-ip> 'gunzip | sudo docker load'
+   read -s GHCR_TOKEN && echo "$GHCR_TOKEN" | docker login ghcr.io -u mystikxkemix --password-stdin; unset GHCR_TOKEN
+   sudo docker --config /DATA/.docker pull ghcr.io/mystikxkemix/youtubaar:latest
    ```
+   (Or make the package public in its GitHub settings and skip the login.)
 2. ZimaOS App Store → **+** (custom install) → **Import**, paste:
    ```yaml
    name: youtubaar
    services:
      youtubaar:
-       image: youtubaar:latest
-       pull_policy: never              # local image, never pulled from a registry
+       image: ghcr.io/mystikxkemix/youtubaar:latest
        container_name: youtubaar
        restart: unless-stopped
        ports:
@@ -75,11 +77,12 @@ image on the Mac and load it on the box:
          POLL_INTERVAL_MINUTES: "30"
          AUTH_PASSWORD: change-me      # basic auth, user "admin"
        volumes:
-         - /DATA/AppData/youtubaar:/data     # subscriptions + video list (back up)
-         - /DATA/Media/YouTube:/downloads    # one folder per subscription
+         - /DATA/AppData/youtubaar:/data     # subscriptions, video list, yt-dlp (back up)
+         - /DATA/Media/YouTube:/downloads    # one folder per subscription (Jellyfin: same folder)
    ```
 3. Open `http://<zima-ip>:8085`.
-4. Update later: rerun step 1, then restart the app in ZimaOS.
+4. Update later: pull again with the `--config` command above, then restart the app.
+   yt-dlp itself updates without this (see below).
 
 For age-restricted or members-only videos, put a `cookies.txt` export in
 `/DATA/AppData/youtubaar` and set `YTDLP_EXTRA_ARGS: --cookies /data/cookies.txt`.
