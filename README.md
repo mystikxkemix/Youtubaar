@@ -121,7 +121,10 @@ Jellyfin's real-time monitor adds new episodes by itself, but it does not read a
 `.nfo` again when it changes later (for example after **Organize for Jellyfin**): the
 episode then keeps its file name as title and has no number. Set `JELLYFIN_URL` and
 `JELLYFIN_API_KEY` and Youtubaar asks Jellyfin to refresh the show after new episodes
-are placed; a show page also gets a **Refresh in Jellyfin** button. Without them, use
+are placed; a show page also gets a **Refresh in Jellyfin** button. `tvshow.nfo` locks
+the show so Jellyfin never matches it against TV databases, and Jellyfin skips every
+refresh of a locked show: Youtubaar unlocks it for the refresh and locks it again
+2 minutes later. Without them, use
 Jellyfin's *Refresh metadata > Replace all metadata* on the show.
 
 1. Mount the folder Jellyfin reads as Youtubaar's `/downloads`, e.g. on ZimaOS
