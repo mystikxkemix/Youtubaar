@@ -66,6 +66,7 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
+          build-args: VERSION=${{ steps.version.outputs.version }}
           labels: ${{ steps.meta.outputs.labels }}
           # No build provenance: it embeds the GitHub push event (commit emails and
           # messages), which anyone could read if the package is public.

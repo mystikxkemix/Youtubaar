@@ -110,6 +110,7 @@ export function createServer(config: Config, library: Library, downloaderName: s
   };
 
   route('GET', '/api/status', () => ({
+    version: config.version,
     downloader: downloaderName,
     pollIntervalMinutes: config.pollIntervalMinutes,
     lastPollAt: library.lastPoll,

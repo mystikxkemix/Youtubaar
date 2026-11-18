@@ -3,6 +3,8 @@ import path from 'node:path';
 export type DownloaderKind = 'metube' | 'ytdlp';
 
 export interface Config {
+  /** Release shown in the UI: the image's 1.N tag, "dev" outside a CI build. */
+  version: string;
   port: number;
   dataDir: string;
   publicDir: string;
@@ -56,6 +58,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   return {
+    version: env.APP_VERSION?.trim() || 'dev',
     port: intEnv(env, 'PORT', 8085, 1),
     dataDir: path.resolve(env.DATA_DIR ?? './data'),
     publicDir: path.resolve(__dirname, '../../public'),

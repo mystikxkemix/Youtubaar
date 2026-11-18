@@ -1292,6 +1292,7 @@ function renderNav() {
     ytdlp ? el('a', { href: '#/system', class: ytdlp.version === null ? 'bad' : ytdlp.updateAvailable ? 'warn' : '' },
       ytdlp.version === null ? 'yt-dlp is not installed' : ytdlp.updateAvailable ? `yt-dlp ${ytdlp.version}, update available` : `yt-dlp ${ytdlp.version}`) : null,
     status?.nextPollAt ? el('span', { text: `Next check ${relativeTime(status.nextPollAt)}` }) : null,
+    status?.version ? el('a', { href: 'https://github.com/mystikxkemix/Youtubaar', target: '_blank', rel: 'noopener', text: `Youtubaar ${status.version}` }) : null,
   ].filter(Boolean));
 
   $('#poll-status').textContent = status?.checking ? 'Checking for new videos' : status?.lastPollAt ? `Checked ${relativeTime(status.lastPollAt)}` : '';

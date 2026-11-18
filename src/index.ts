@@ -102,7 +102,7 @@ function main(): void {
 
   const server = createServer(config, library, downloader.name, ytdlpControl);
   server.listen(config.port, () => {
-    log(`Youtubaar listening on :${config.port}, downloader ${downloader.name}, polling every ${config.pollIntervalMinutes} min`);
+    log(`Youtubaar ${config.version} listening on :${config.port}, downloader ${downloader.name}, polling every ${config.pollIntervalMinutes} min`);
     if (config.authPassword === '') {
       log('AUTH_PASSWORD is not set: the UI is open to anyone who can reach this port');
     }
