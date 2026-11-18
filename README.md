@@ -56,7 +56,9 @@ Then open `http://<host>:8085`. Videos land in `./downloads/<subscription folder
 ## Install on ZimaOS
 
 CI publishes `ghcr.io/mystikxkemix/youtubaar:latest` (linux/amd64) after the tests pass
-on `master`, plus a `sha-<commit>` tag per build. The package is private by default:
+on `master`. Each build is also tagged `1.<number of commits on master>` (e.g. `1.9`)
+and `sha-<commit>`, so you can pin or roll back to one build. The package is private
+by default:
 
 1. Create a GitHub **classic** token with only `read:packages`, then on ZimaOS log in as
    your user (ZimaOS's root filesystem is read-only, so root cannot store a login) and
