@@ -301,10 +301,10 @@ export async function placeEpisode(
   const oldStem = path.join(path.dirname(mediaPath), path.basename(mediaPath, extension));
   const base = path.join(seasonDir, episodeBaseName(plan.season, plan.episode, meta.title ?? meta.id));
   const target = `${base}${extension}`;
-  if (target !== mediaPath) {
-    await fs.rename(mediaPath, target);
-  }
 
+  // The .nfo and thumbnail go in place before the video: Jellyfin's real-time monitor adds
+  // an episode as soon as its video appears and does not read an .nfo written after it,
+  // so a late .nfo leaves the episode named after its file and without a number.
   const thumbTarget = `${base}-thumb.jpg`;
   if (`${oldStem}-thumb.jpg` !== thumbTarget && (await exists(`${oldStem}-thumb.jpg`))) {
     await fs.rename(`${oldStem}-thumb.jpg`, thumbTarget);
@@ -322,5 +322,8 @@ export async function placeEpisode(
     await fs.rm(`${oldStem}.nfo`);
   }
   await fs.writeFile(`${base}.nfo`, episodeNfo(meta, subscription.name, plan.season, plan.episode));
+  if (target !== mediaPath) {
+    await fs.rename(mediaPath, target);
+  }
   return target;
 }
