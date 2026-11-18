@@ -55,25 +55,16 @@ Then open `http://<host>:8085`. Videos land in `./downloads/<subscription folder
 
 ## Install on ZimaOS
 
-CI publishes `ghcr.io/mystikxkemix/youtubaar:latest` (linux/amd64) after the tests pass
-on `master`. Each build is also tagged `1.<number of commits on master>` (e.g. `1.9`)
-and `sha-<commit>`, so you can pin or roll back to one build. The package is private
-by default:
+CI publishes the public image `ghcr.io/mystikxkemix/youtubaar` (linux/amd64) after the
+tests pass on `master`, tagged `latest`, `1.<number of commits on master>` (e.g. `1.10`)
+and `sha-<commit>`. Pin a `1.N` tag: updating is then just changing the number.
 
-1. Create a GitHub **classic** token with only `read:packages`, then on ZimaOS log in as
-   your user (ZimaOS's root filesystem is read-only, so root cannot store a login) and
-   pull with root pointing at that config:
-   ```sh
-   read -s GHCR_TOKEN && echo "$GHCR_TOKEN" | docker login ghcr.io -u mystikxkemix --password-stdin; unset GHCR_TOKEN
-   sudo docker --config /DATA/.docker pull ghcr.io/mystikxkemix/youtubaar:latest
-   ```
-   (Or make the package public in its GitHub settings and skip the login.)
-2. ZimaOS App Store → **+** (custom install) → **Import**, paste:
+1. ZimaOS App Store → **+** (custom install) → **Import**, paste:
    ```yaml
    name: youtubaar
    services:
      youtubaar:
-       image: ghcr.io/mystikxkemix/youtubaar:latest
+       image: ghcr.io/mystikxkemix/youtubaar:1.10
        container_name: youtubaar
        restart: unless-stopped
        ports:
@@ -86,9 +77,10 @@ by default:
          - /DATA/AppData/youtubaar:/data     # subscriptions, video list, yt-dlp (back up)
          - /DATA/Media/YouTube:/downloads    # one folder per subscription (Jellyfin: same folder)
    ```
-3. Open `http://<zima-ip>:8085`.
-4. Update later: pull again with the `--config` command above, then restart the app.
-   yt-dlp itself updates without this (see below).
+2. Open `http://<zima-ip>:8085`.
+3. Update later: in ZimaOS, open the app's settings, set the new `1.N` tag on the image
+   and save. ZimaOS pulls it and restarts the app. yt-dlp itself updates without this
+   (see below).
 
 For age-restricted or members-only videos, put a `cookies.txt` export in
 `/DATA/AppData/youtubaar` and set `YTDLP_EXTRA_ARGS: --cookies /data/cookies.txt`.

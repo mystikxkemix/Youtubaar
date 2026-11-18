@@ -26,7 +26,7 @@ jobs:
       - run: npm test
 
   # Publishes ghcr.io/<owner>/youtubaar after the tests pass on master.
-  # ZimaOS pulls it (docker login ghcr.io with a read:packages token).
+  # The package is public, so ZimaOS pulls it without a login.
   image:
     name: Publish image
     needs: [test]
