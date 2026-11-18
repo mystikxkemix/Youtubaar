@@ -6,6 +6,14 @@ export type SourceKind = 'channel' | 'playlist';
 export type DownloadType = 'video' | 'audio';
 
 /**
+ * How a playlist numbers its episodes. auto reads the order from the upload dates:
+ * some creators add each new part at the top, so the newest video comes first.
+ */
+export type PlaylistOrder = 'auto' | 'oldest-first' | 'newest-first';
+
+export const PLAYLIST_ORDERS: readonly PlaylistOrder[] = ['auto', 'oldest-first', 'newest-first'];
+
+/**
  * Lifecycle of a video:
  * available (in the inbox) -> queued -> downloading -> done | failed.
  * ignored is a side state the user (or a filter) can put a video in, and take it back out of.
@@ -46,6 +54,8 @@ export interface Subscription extends DownloadOptions {
   skipShorts: boolean;
   /** Save as a Jellyfin show: season folders, .nfo files and thumbnails (yt-dlp downloader). */
   jellyfin?: boolean;
+  /** Playlists: which end of the playlist is episode 1 (undefined = auto). */
+  playlistOrder?: PlaylistOrder;
   /** Playlists: set once yt-dlp listed the whole playlist (the feed only shows the first 15). */
   fullyListed?: boolean;
   enabled: boolean;

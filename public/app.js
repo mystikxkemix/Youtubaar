@@ -860,6 +860,11 @@ function settingsFields(initial, options = {}) {
     : null;
   if (initialSelect) initialSelect.classList.remove('select');
   const hasFilters = Boolean(initial.titleInclude || initial.titleExclude || initial.skipShorts);
+  // Playlists only: which end is episode 1 in the Jellyfin layout.
+  const orderSelect = initial.kind === 'playlist'
+    ? selectInput([['auto', 'Automatic (from upload dates)'], ['oldest-first', 'Oldest video first'], ['newest-first', 'Newest video first']], initial.playlistOrder ?? 'auto', () => {}, 'Playlist order')
+    : null;
+  if (orderSelect) orderSelect.classList.remove('select');
 
   const section = el('div', { style: { display: 'flex', flexDirection: 'column', gap: '18px' } }, [
     choice,
@@ -870,6 +875,7 @@ function settingsFields(initial, options = {}) {
       el('label', { class: 'field' }, [el('span', { text: 'Quality' }), quality]),
     ]),
     el('label', { class: 'switch big' }, [jellyfinInput, el('span', {}, [el('b', { text: 'Jellyfin metadata' }), jellyfinHint])]),
+    orderSelect ? el('label', { class: 'field' }, [el('span', { text: 'Playlist order' }), orderSelect, el('small', { text: 'Which end of the playlist is episode 1. Automatic works for most playlists. After a change, use "Organize for Jellyfin" to renumber the downloaded episodes.' })]) : null,
     initialSelect ? el('label', { class: 'field' }, [el('span', { text: 'Videos already on the channel (latest 15)' }), initialSelect]) : null,
     el('details', { class: 'more', open: hasFilters }, [
       el('summary', { text: 'Filters' }),
@@ -893,6 +899,7 @@ function settingsFields(initial, options = {}) {
     titleExclude: exclude.value,
     skipShorts: skipShorts.checked,
     jellyfin: jellyfinInput.checked,
+    ...(orderSelect ? { playlistOrder: orderSelect.value } : {}),
     ...(initialSelect ? { initial: initialSelect.value } : {}),
   });
   return { section, read, folder, choice };

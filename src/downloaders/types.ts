@@ -3,6 +3,8 @@ import type { Subscription, Video } from '../types';
 export interface DownloadJob {
   video: Video;
   subscription: Subscription;
+  /** Playlists: episode number for the Jellyfin layout (see playlistEpisode); null otherwise. */
+  episode?: number | null;
 }
 
 export interface DownloadUpdate {

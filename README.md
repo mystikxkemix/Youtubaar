@@ -124,6 +124,10 @@ files and thumbnails (metadata is read again from YouTube, nothing is re-downloa
 **Playlists are separate shows.** A followed playlist gets its own folder next to the
 channel's (`mistermv` and `mistermv_ZELDA_OCARINA_OF_TIME`), a single `Season_01`, and
 episodes numbered by their place in the playlist, so a let's play reads 1, 2, 3...
+Some creators add each new part at the top of the playlist. Youtubaar sees this from the
+upload dates and then counts from the bottom, so part 1 is still episode 1. If the dates
+guess wrong, set **Playlist order** on the subscription (*Edit*), then run **Organize for
+Jellyfin** to renumber the episodes already downloaded.
 A Jellyfin show folder cannot sit inside another subscription's folder (it would read
 as a season), and Youtubaar refuses that setup.
 

@@ -42,7 +42,7 @@ export function usesJellyfin(job: DownloadJob): boolean {
 }
 
 export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs: string[]): string[] {
-  const { subscription, video } = job;
+  const { subscription } = job;
   const args = [
     '--no-playlist',
     // Titles in file names keep only ASCII letters, digits, "_", "-" and ".".
@@ -81,7 +81,7 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
     // Downloaded into its season under a temporary name with a "-thumb.jpg", plus the
     // metadata the .nfo is written from; placeEpisode then gives it its Kodi name.
     // Channels: one season per upload year. Playlists: one season, in playlist order.
-    const ordered = subscription.kind === 'playlist' && Boolean(video.position);
+    const ordered = subscription.kind === 'playlist' && Boolean(job.episode);
     const seasonDir = path.join(downloadDir, subscription.folder, ordered ? PLAYLIST_SEASON_FOLDER : SEASON_FOLDER);
     args.push(
       '-o', path.join(seasonDir, OUTPUT_TEMPLATE),
@@ -92,7 +92,7 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
   } else {
     args.push('-o', path.join(downloadDir, subscription.folder, OUTPUT_TEMPLATE));
   }
-  args.push(...extraArgs, video.url);
+  args.push(...extraArgs, job.video.url);
   return args;
 }
 
@@ -272,7 +272,7 @@ export class YtdlpDownloader implements Downloader {
     try {
       const showDir = path.join(this.downloadDir, job.subscription.folder);
       await ensureShowMetadata(showDir, job.subscription);
-      return { filename: await placeEpisode(filename, showDir, metadata, job.subscription, job.video.position), note: null };
+      return { filename: await placeEpisode(filename, showDir, metadata, job.subscription, job.episode), note: null };
     } catch (error) {
       return { filename, note: `Downloaded, but it could not be named and tagged for Jellyfin: ${(error as Error).message}` };
     }

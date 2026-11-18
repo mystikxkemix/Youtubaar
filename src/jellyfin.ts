@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileSlug } from './rules';
-import type { Subscription } from './types';
+import type { PlaylistOrder, Subscription } from './types';
 
 /**
  * Jellyfin "Shows" layout: each subscription is a show, each upload year a season,
@@ -166,6 +166,59 @@ async function readSeasonEpisodes(seasonDir: string): Promise<ExistingEpisode[]>
   return episodes;
 }
 
+/** A playlist video as the episode numbering sees it. */
+export interface PlaylistItem {
+  position?: number | null;
+  publishedAt: string | null;
+}
+
+/**
+ * Whether a playlist lists its newest video first: walks the dated videos in playlist
+ * order and compares how often the upload date goes down against how often it goes up.
+ * Undated videos (beyond the feed's latest 15) are skipped. A tie means oldest first.
+ */
+export function isNewestFirst(items: readonly PlaylistItem[]): boolean {
+  const dated: { position: number; time: number }[] = [];
+  for (const item of items) {
+    const time = item.publishedAt === null ? Number.NaN : Date.parse(item.publishedAt);
+    if (item.position && Number.isFinite(time)) {
+      dated.push({ position: item.position, time });
+    }
+  }
+  dated.sort((a, b) => a.position - b.position);
+  let down = 0;
+  let up = 0;
+  for (let index = 1; index < dated.length; index++) {
+    if (dated[index].time < dated[index - 1].time) {
+      down++;
+    } else if (dated[index].time > dated[index - 1].time) {
+      up++;
+    }
+  }
+  return down > up;
+}
+
+/**
+ * Episode number of a playlist video: its place counted from the oldest end, so a
+ * newest-first playlist still starts at episode 1, and adding a part (at the bottom of
+ * an oldest-first playlist, at the top of a newest-first one) does not renumber the others.
+ * Null when the video has no place in the playlist.
+ */
+export function playlistEpisode(position: number | null | undefined, items: readonly PlaylistItem[], order: PlaylistOrder = 'auto'): number | null {
+  if (!position) {
+    return null;
+  }
+  const newestFirst = order === 'auto' ? isNewestFirst(items) : order === 'newest-first';
+  if (!newestFirst) {
+    return position;
+  }
+  let total = position;
+  for (const item of items) {
+    total = Math.max(total, item.position ?? 0);
+  }
+  return total - position + 1;
+}
+
 export interface EpisodePlan {
   season: number;
   episode: number;
@@ -174,13 +227,14 @@ export interface EpisodePlan {
 }
 
 /**
- * Season and episode for a video. Playlists: season 1, episode = place in the playlist.
+ * Season and episode for a video. Playlists: season 1, episode = episodeInPlaylist
+ * (see playlistEpisode).
  * Channels: season = upload year, episode = MMDD + index of the day; a video already
  * numbered in that season keeps its number (retries, re-organizing).
  */
-export async function planEpisode(showDir: string, meta: VideoMetadata, subscription: Subscription, position?: number | null): Promise<EpisodePlan> {
-  if (subscription.kind === 'playlist' && position) {
-    return { season: 1, episode: position, seasonFolder: PLAYLIST_SEASON_FOLDER };
+export async function planEpisode(showDir: string, meta: VideoMetadata, subscription: Subscription, episodeInPlaylist?: number | null): Promise<EpisodePlan> {
+  if (subscription.kind === 'playlist' && episodeInPlaylist) {
+    return { season: 1, episode: episodeInPlaylist, seasonFolder: PLAYLIST_SEASON_FOLDER };
   }
   const aired = airDate(meta) ?? new Date().toISOString().slice(0, 10);
   const season = Number(aired.slice(0, 4));
@@ -211,6 +265,7 @@ export function kodiBaseName(showName: string, season: number, episode: number, 
 /**
  * Puts a downloaded video in its Kodi place: season folder, Kodi name for the video,
  * its "-thumb.jpg" and its .nfo. Returns the video's new path.
+ * episodeInPlaylist: the playlist episode number (see playlistEpisode); ignored for channels.
  * thumbnail: the image to use when none sits next to the file yet (e.g. older downloads).
  */
 export async function placeEpisode(
@@ -218,10 +273,10 @@ export async function placeEpisode(
   showDir: string,
   meta: VideoMetadata,
   subscription: Subscription,
-  position?: number | null,
+  episodeInPlaylist?: number | null,
   thumbnailUrl?: string | null,
 ): Promise<string> {
-  const plan = await planEpisode(showDir, meta, subscription, position);
+  const plan = await planEpisode(showDir, meta, subscription, episodeInPlaylist);
   const seasonDir = path.join(showDir, plan.seasonFolder);
   await fs.mkdir(seasonDir, { recursive: true });
 

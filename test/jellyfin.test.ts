@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { buildYtdlpArgs, tidyStem } from '../src/downloaders/ytdlp';
-import { airDate, episodeNfo, episodeNumber, kodiBaseName, placeEpisode, showNfo, type VideoMetadata } from '../src/jellyfin';
+import { airDate, episodeNfo, episodeNumber, isNewestFirst, kodiBaseName, placeEpisode, playlistEpisode, showNfo, type VideoMetadata } from '../src/jellyfin';
 import { fileSlug } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
 
@@ -111,7 +111,7 @@ test('tidyStem leaves only letters, digits, underscores and dashes', () => {
 
 test('a playlist is one season in playlist order', async () => {
   const playlist: Subscription = { ...subscription, kind: 'playlist', sourceId: 'PLxyz1234567890abcd', name: 'Zelda OoT', folder: 'mistermv_Zelda_OoT' };
-  const args = buildYtdlpArgs({ video: { ...video, position: 3 }, subscription: playlist }, '/downloads', []);
+  const args = buildYtdlpArgs({ video: { ...video, position: 3 }, subscription: playlist, episode: 3 }, '/downloads', []);
   assert.ok(args.includes('/downloads/mistermv_Zelda_OoT/Season_01/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s'));
 
   const show = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-pl-'));
@@ -124,5 +124,58 @@ test('a playlist is one season in playlist order', async () => {
   assert.match(xml, /<season>1<\/season>/);
   assert.match(xml, /<episode>3<\/episode>/);
   assert.match(xml, /<showtitle>Zelda OoT<\/showtitle>/);
+  fs.rmSync(show, { recursive: true, force: true });
+});
+
+/** Playlist items in playlist order: place 1 has the first date. */
+function items(dates: (string | null)[]): { position: number; publishedAt: string | null }[] {
+  return dates.map((publishedAt, index) => ({ position: index + 1, publishedAt }));
+}
+
+test('isNewestFirst reads the playlist order from the upload dates', () => {
+  assert.equal(isNewestFirst(items(['2025-11-01', '2025-11-02', '2025-11-03'])), false);
+  assert.equal(isNewestFirst(items(['2025-12-10', '2025-12-05', '2025-11-29', '2025-11-20'])), true);
+  // Undated videos (past the feed's latest 15) are skipped; a mostly-down order still counts.
+  assert.equal(isNewestFirst(items(['2025-12-10', null, '2025-12-01', '2025-12-03', '2025-11-20'])), true);
+  // No dates or a tie: keep the playlist order.
+  assert.equal(isNewestFirst(items([null, null])), false);
+  assert.equal(isNewestFirst(items(['2025-11-01', '2025-11-03', '2025-11-02'])), false);
+});
+
+test('playlistEpisode counts from the oldest end, and stays put when a part is added', () => {
+  // The Blake Manor case: 15 parts, newest first, part (05) sits in place 11.
+  const newestFirst = items(Array.from({ length: 15 }, (_, index) => `2025-12-${String(30 - index).padStart(2, '0')}`));
+  assert.equal(playlistEpisode(11, newestFirst), 5);
+  assert.equal(playlistEpisode(1, newestFirst), 15);
+  assert.equal(playlistEpisode(15, newestFirst), 1);
+  // A 16th part is added at the top: every place moves down by one, the numbers do not change.
+  const withNewPart = items(['2025-12-31', ...newestFirst.map((item) => item.publishedAt)]);
+  assert.equal(playlistEpisode(12, withNewPart), 5);
+
+  const oldestFirst = items(['2025-11-01', '2025-11-02', '2025-11-03']);
+  assert.equal(playlistEpisode(2, oldestFirst), 2);
+  // The manual setting wins over the dates.
+  assert.equal(playlistEpisode(1, oldestFirst, 'newest-first'), 3);
+  assert.equal(playlistEpisode(11, newestFirst, 'oldest-first'), 11);
+  assert.equal(playlistEpisode(null, oldestFirst), null);
+});
+
+test('placeEpisode renumbers an episode that was placed with the wrong number', async () => {
+  const playlist: Subscription = { ...subscription, kind: 'playlist', sourceId: 'PLxyz1234567890abcd', name: 'Blake Manor', folder: 'Blake_Manor' };
+  const show = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-renum-'));
+  const season = path.join(show, 'Season_01');
+  fs.mkdirSync(season);
+  const media = path.join(season, 'Blake_Manor_S01E11_Cats_vs_Dogs_more.webm');
+  fs.writeFileSync(media, '');
+  fs.writeFileSync(path.join(season, 'Blake_Manor_S01E11_Cats_vs_Dogs_more.nfo'), '<episode>11</episode>');
+  fs.writeFileSync(path.join(season, 'Blake_Manor_S01E11_Cats_vs_Dogs_more-thumb.jpg'), '');
+  const placed = await placeEpisode(media, show, meta, playlist, 5);
+  assert.equal(path.basename(placed), 'Blake_Manor_S01E05_Cats_vs_Dogs_more.webm');
+  assert.deepEqual(fs.readdirSync(season).sort(), [
+    'Blake_Manor_S01E05_Cats_vs_Dogs_more-thumb.jpg',
+    'Blake_Manor_S01E05_Cats_vs_Dogs_more.nfo',
+    'Blake_Manor_S01E05_Cats_vs_Dogs_more.webm',
+  ]);
+  assert.match(fs.readFileSync(placed.replace('.webm', '.nfo'), 'utf8'), /<episode>5<\/episode>/);
   fs.rmSync(show, { recursive: true, force: true });
 });

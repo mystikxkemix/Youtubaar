@@ -3,10 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { Config } from './config';
 import type { Downloader, DownloadUpdate } from './downloaders/types';
-import { ensureShowMetadata, placeEpisode, type VideoMetadata } from './jellyfin';
+import { ensureShowMetadata, placeEpisode, playlistEpisode, type VideoMetadata } from './jellyfin';
 import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from './rules';
 import type { Store } from './store';
-import type { DownloadType, InitialAction, Mode, Subscription, Video, VideoStatus } from './types';
+import { PLAYLIST_ORDERS, type DownloadType, type InitialAction, type Mode, type PlaylistOrder, type Subscription, type Video, type VideoStatus } from './types';
 import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, fetchVideoMetadata, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
 
 export interface SubscriptionInput {
@@ -21,6 +21,7 @@ export interface SubscriptionInput {
   titleExclude?: string;
   skipShorts?: boolean;
   jellyfin?: boolean;
+  playlistOrder?: PlaylistOrder;
   enabled?: boolean;
   /** Creation only: what to do with the videos already in the source. */
   initial?: InitialAction;
@@ -212,6 +213,7 @@ export class Library {
       titleExclude: input.titleExclude ?? '',
       skipShorts: input.skipShorts ?? false,
       jellyfin: input.jellyfin ?? false,
+      playlistOrder: input.playlistOrder ?? 'auto',
       enabled: input.enabled ?? true,
       createdAt: now(),
       lastCheckedAt: now(),
@@ -241,6 +243,7 @@ export class Library {
       titleExclude: input.titleExclude ?? current.titleExclude,
       skipShorts: input.skipShorts ?? current.skipShorts,
       jellyfin: input.jellyfin ?? current.jellyfin ?? false,
+      playlistOrder: input.playlistOrder ?? current.playlistOrder ?? 'auto',
       enabled: input.enabled ?? current.enabled,
     };
     this.validate(next);
@@ -336,7 +339,7 @@ export class Library {
       }
       try {
         const metadata = (await fetchVideoMetadata(video.url, this.ytdlpPath())) as unknown as VideoMetadata;
-        const placed = await placeEpisode(current, showDir, metadata, subscription, video.position, video.thumbnail);
+        const placed = await placeEpisode(current, showDir, metadata, subscription, this.episodeInPlaylist(video, subscription), video.thumbnail);
         video.filename = path.relative(this.config.downloadDir, placed);
         video.updatedAt = now();
         organized++;
@@ -475,7 +478,7 @@ export class Library {
       video.progress = 0;
       video.sentAt = now();
       video.updatedAt = now();
-      downloader.start({ video, subscription }).catch((error: Error) => {
+      downloader.start({ video, subscription, episode: this.episodeInPlaylist(video, subscription) }).catch((error: Error) => {
         this.onDownloadUpdate(video.id, { status: 'failed', note: error.message });
       });
     }
@@ -545,6 +548,20 @@ export class Library {
     }
   };
 
+  /** Playlist episode number of a video, from all the videos of its playlist; null for channels. */
+  private episodeInPlaylist(video: Video, subscription: Subscription): number | null {
+    if (subscription.kind !== 'playlist') {
+      return null;
+    }
+    const items: Video[] = [];
+    for (const candidate of Object.values(this.store.data.videos)) {
+      if (candidate.subscriptionId === subscription.id) {
+        items.push(candidate);
+      }
+    }
+    return playlistEpisode(video.position, items, subscription.playlistOrder);
+  }
+
   private validate(subscription: Subscription): void {
     validateDownloadOptions(subscription);
     compileTitleFilter(subscription.titleInclude);
@@ -561,6 +578,9 @@ export class Library {
       if (inside(subscription.folder, other.folder) || inside(other.folder, subscription.folder)) {
         throw new Error(`With Jellyfin metadata, "${subscription.folder}" cannot share or sit inside "${other.folder}" (${other.name}); pick a folder next to it`);
       }
+    }
+    if (subscription.playlistOrder !== undefined && !PLAYLIST_ORDERS.includes(subscription.playlistOrder)) {
+      throw new Error(`Playlist order must be one of: ${PLAYLIST_ORDERS.join(', ')}`);
     }
     if (subscription.mode !== 'auto' && subscription.mode !== 'manual') {
       throw new Error('Mode must be "auto" or "manual"');
