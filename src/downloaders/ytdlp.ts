@@ -41,15 +41,12 @@ export function usesJellyfin(job: DownloadJob): boolean {
   return job.subscription.jellyfin === true && job.subscription.downloadType === 'video';
 }
 
-export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs: string[]): string[] {
-  const { subscription } = job;
-  const args = [
-    '--no-playlist',
-    // Titles in file names keep only ASCII letters, digits, "_", "-" and ".".
-    '--restrict-filenames',
-    '--newline',
-    '--embed-metadata',
-    '--no-simulate',
+/**
+ * Arguments every yt-dlp download shares: the final path (read with filepathFrom), the
+ * streams and progress lines ProgressTracker reads, and the JavaScript runtime.
+ */
+export function trackingArgs(): string[] {
+  return [
     // Final file path, reported once the file is in place.
     '--print', `after_move:${FILEPATH_MARKER}%(filepath)s`,
     // The streams about to be downloaded (video + audio) and their sizes when YouTube
@@ -63,6 +60,24 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
     // Recent yt-dlp needs a JavaScript runtime to solve YouTube's challenges; only Deno is
     // enabled by default, so point it at the Node running Youtubaar.
     '--js-runtimes', `node:${process.execPath}`,
+  ];
+}
+
+/** The final file path from a yt-dlp output line printed by trackingArgs, or null. */
+export function filepathFrom(line: string): string | null {
+  return line.startsWith(FILEPATH_MARKER) ? line.slice(FILEPATH_MARKER.length) : null;
+}
+
+export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs: string[]): string[] {
+  const { subscription } = job;
+  const args = [
+    '--no-playlist',
+    // Titles in file names keep only ASCII letters, digits, "_", "-" and ".".
+    '--restrict-filenames',
+    '--newline',
+    '--embed-metadata',
+    '--no-simulate',
+    ...trackingArgs(),
   ];
 
   if (subscription.downloadType === 'audio') {

@@ -10,6 +10,8 @@ export interface RunOptions {
   /** Called for each complete stdout line, as it arrives. */
   onLine?: (line: string) => void;
   timeoutMs?: number;
+  /** Stops the command (SIGTERM) when aborted; the promise still resolves with its exit code. */
+  signal?: AbortSignal;
 }
 
 /** Runs a command and collects its output. Rejects only when the binary cannot be started. */
@@ -20,6 +22,7 @@ export function run(command: string, args: string[], options: RunOptions = {}): 
     let stderr = '';
     let pending = '';
     const timer = options.timeoutMs === undefined ? null : setTimeout(() => child.kill('SIGTERM'), options.timeoutMs);
+    options.signal?.addEventListener('abort', () => child.kill('SIGTERM'), { once: true });
 
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');

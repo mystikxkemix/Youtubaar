@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { Config } from './config';
 import { NotFoundError, type Library, type SubscriptionInput, type VideoAction } from './library';
+import type { QuickDownloads, QuickInput } from './quick';
 import { VIDEO_STATUSES, type VideoStatus } from './types';
 import type { YtdlpStatus } from './ytdlpManager';
 
@@ -89,6 +90,52 @@ function parseStatuses(raw: string | null): VideoStatus[] | undefined {
   return statuses;
 }
 
+const MEDIA_TYPES: Record<string, string> = {
+  '.mp4': 'video/mp4',
+  '.m4a': 'audio/mp4',
+  '.webm': 'video/webm',
+  '.mkv': 'video/x-matroska',
+  '.mp3': 'audio/mpeg',
+  '.opus': 'audio/ogg',
+};
+
+/** "attachment" header that keeps accents and spaces (RFC 6266), with a plain ASCII fallback. */
+export function attachmentHeader(name: string): string {
+  const ascii = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^\x20-\x7e]|["\\]/g, '_');
+  return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(name)}`;
+}
+
+/** Streams a file as a download, with Range support so browsers can resume. */
+function serveDownload(request: http.IncomingMessage, response: http.ServerResponse, file: string): void {
+  const size = fs.statSync(file).size;
+  const headers: http.OutgoingHttpHeaders = {
+    'Content-Type': MEDIA_TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream',
+    'Content-Disposition': attachmentHeader(path.basename(file)),
+    'Accept-Ranges': 'bytes',
+    'Cache-Control': 'no-store',
+  };
+  const range = /^bytes=(\d*)-(\d*)$/.exec(request.headers.range ?? '');
+  let start = 0;
+  let end = size - 1;
+  if (range !== null && (range[1] !== '' || range[2] !== '')) {
+    start = range[1] === '' ? Math.max(0, size - Number(range[2])) : Number(range[1]);
+    end = range[1] === '' || range[2] === '' ? size - 1 : Math.min(Number(range[2]), size - 1);
+    if (start > end || start >= size) {
+      response.writeHead(416, { 'Content-Range': `bytes */${size}` });
+      response.end();
+      return;
+    }
+    response.writeHead(206, { ...headers, 'Content-Range': `bytes ${start}-${end}/${size}`, 'Content-Length': end - start + 1 });
+  } else {
+    response.writeHead(200, { ...headers, 'Content-Length': size });
+  }
+  if (request.method === 'HEAD') {
+    response.end();
+    return;
+  }
+  fs.createReadStream(file, { start, end }).pipe(response);
+}
+
 function serveStatic(config: Config, pathname: string, response: http.ServerResponse): void {
   const relative = pathname === '/' ? 'index.html' : decodeURIComponent(pathname).replace(/^\/+/, '');
   const file = path.resolve(config.publicDir, relative);
@@ -103,7 +150,7 @@ function serveStatic(config: Config, pathname: string, response: http.ServerResp
   fs.createReadStream(file).pipe(response);
 }
 
-export function createServer(config: Config, library: Library, downloaderName: string, ytdlp: YtdlpControl): http.Server {
+export function createServer(config: Config, library: Library, quick: QuickDownloads, downloaderName: string, ytdlp: YtdlpControl): http.Server {
   const routes: Route[] = [];
   const route = (method: string, pattern: string, handler: Handler): void => {
     routes.push({ method, pattern: new RegExp(`^${pattern}$`), handler });
@@ -113,6 +160,7 @@ export function createServer(config: Config, library: Library, downloaderName: s
     version: config.version,
     downloader: downloaderName,
     pollIntervalMinutes: config.pollIntervalMinutes,
+    quickDownloadHours: config.quickDownloadHours,
     lastPollAt: library.lastPoll,
     nextPollAt: library.nextPollAt,
     checking: library.isChecking,
@@ -189,6 +237,17 @@ export function createServer(config: Config, library: Library, downloaderName: s
     return { changed: library.applyAction(ids as string[], action as VideoAction) };
   });
 
+  route('GET', '/api/quick', () => quick.list());
+
+  route('POST', '/api/quick', ({ body }) => quick.add(body as QuickInput));
+
+  route('DELETE', '/api/quick/([\\w-]+)', async ({ params }) => {
+    if (!(await quick.remove(params[0]))) {
+      throw new HttpError(404, 'This quick download no longer exists');
+    }
+    return { ok: true };
+  });
+
   return http.createServer(async (request, response) => {
     try {
       if (!isAuthorized(request, config)) {
@@ -202,6 +261,16 @@ export function createServer(config: Config, library: Library, downloaderName: s
           throw new HttpError(405, 'Method not allowed');
         }
         serveStatic(config, url.pathname, response);
+        return;
+      }
+      const quickFile = /^\/api\/quick\/([\w-]+)\/file$/.exec(url.pathname);
+      if (quickFile !== null && (request.method === 'GET' || request.method === 'HEAD')) {
+        const item = quick.get(quickFile[1]);
+        const file = item === undefined ? null : quick.filePath(item);
+        if (file === null || !fs.existsSync(file)) {
+          throw new HttpError(404, 'This file is not available, or it has expired');
+        }
+        serveDownload(request, response, file);
         return;
       }
       for (const candidate of routes) {

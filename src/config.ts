@@ -24,6 +24,8 @@ export interface Config {
   /** Extra yt-dlp arguments appended to every download, e.g. "--cookies /data/cookies.txt". */
   ytdlpExtraArgs: string[];
   pollIntervalMinutes: number;
+  /** Hours a quick download stays available before its file is deleted. */
+  quickDownloadHours: number;
   /** Max number of videos fetched when loading a source's full history. */
   backlogLimit: number;
   authUser: string;
@@ -72,6 +74,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pythonPath: env.PYTHON_PATH ?? 'python3',
     ytdlpExtraArgs: extraArgs === '' ? [] : extraArgs.split(/\s+/),
     pollIntervalMinutes: intEnv(env, 'POLL_INTERVAL_MINUTES', 30, 1),
+    quickDownloadHours: intEnv(env, 'QUICK_DOWNLOAD_HOURS', 48, 1),
     backlogLimit: intEnv(env, 'BACKLOG_LIMIT', 500, 1),
     authUser: env.AUTH_USER ?? 'admin',
     authPassword: env.AUTH_PASSWORD ?? '',

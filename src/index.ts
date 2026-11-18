@@ -3,6 +3,7 @@ import { MeTubeDownloader } from './downloaders/metube';
 import type { Downloader } from './downloaders/types';
 import { YtdlpDownloader } from './downloaders/ytdlp';
 import { Library } from './library';
+import { QuickDownloads } from './quick';
 import { createServer, type YtdlpControl } from './server';
 import { Store } from './store';
 import { YtdlpManager } from './ytdlpManager';
@@ -11,6 +12,7 @@ const SYNC_INTERVAL_MS = 15_000;
 const FIRST_POLL_DELAY_MS = 5_000;
 const FIRST_UPDATE_DELAY_MS = 20_000;
 const BUSY_RETRY_MS = 15 * 60_000;
+const QUICK_CLEANUP_MS = 10 * 60_000;
 
 function log(message: string): void {
   console.log(`${new Date().toISOString()} ${message}`);
@@ -40,11 +42,18 @@ function main(): void {
   }
   library.setDownloader(downloader);
 
+  // Quick downloads always use the local yt-dlp, whatever downloads the library.
+  const quick = new QuickDownloads(config.dataDir, config.downloadDir, () => ytdlp.path, config.ytdlpExtraArgs, config.quickDownloadHours, log);
+  quick.start().catch((error: Error) => log(`quick downloads: ${error.message}`));
+  setInterval(() => {
+    quick.cleanup().catch((error: Error) => log(`quick download cleanup failed: ${error.message}`));
+  }, QUICK_CLEANUP_MS);
+
   /** Replaces yt-dlp while no local download is using it; new downloads wait meanwhile. */
   const ytdlpControl: YtdlpControl = {
     status: () => ytdlp.status(),
     update: async () => {
-      const running = config.downloader === 'ytdlp' ? library.activeDownloads : 0;
+      const running = (config.downloader === 'ytdlp' ? library.activeDownloads : 0) + quick.active;
       if (running > 0) {
         throw new Error(`Wait for the ${running} running download(s) to finish before updating yt-dlp`);
       }
@@ -100,7 +109,7 @@ function main(): void {
   }, SYNC_INTERVAL_MS);
   library.processQueue();
 
-  const server = createServer(config, library, downloader.name, ytdlpControl);
+  const server = createServer(config, library, quick, downloader.name, ytdlpControl);
   server.listen(config.port, () => {
     log(`Youtubaar ${config.version} listening on :${config.port}, downloader ${downloader.name}, polling every ${config.pollIntervalMinutes} min`);
     if (config.authPassword === '') {
@@ -110,6 +119,7 @@ function main(): void {
 
   const shutdown = (): void => {
     store.flush();
+    quick.flush();
     server.close();
     process.exit(0);
   };

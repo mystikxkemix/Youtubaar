@@ -44,6 +44,11 @@ YouTube RSS feeds ──poll──▶ Youtubaar ──"download this"──▶ y
 - **Jellyfin**: optional per-subscription show layout with `.nfo` metadata, thumbnails
   and posters, ready for a Jellyfin *Shows* library (see below).
 - **Download tracking**: progress, final file name, failure reason, retry.
+- **Quick download**: paste any video link on the *Quick download* page to get the
+  file without subscribing. It downloads right away (MP4 that plays everywhere, or
+  M4A audio), then a *Save file* button saves it from the browser. The file is kept
+  in a hidden `.quick` folder of the download root (Jellyfin skips it) and deleted
+  after `QUICK_DOWNLOAD_HOURS` (48 by default).
 - **Delete downloads**: remove a downloaded video's file (and its Jellyfin .nfo and
   thumbnail) from its row or from a selection. It moves to *Ignored*, so it is not
   downloaded again. Needs the built-in yt-dlp downloader.
@@ -177,6 +182,7 @@ npm test
 | `METUBE_URL` | (only for `metube`) | MeTube base URL, including its `URL_PREFIX` if set |
 | `DOWNLOAD_DIR` | `./downloads` (`/downloads` in Docker) | Download root for the `ytdlp` downloader |
 | `POLL_INTERVAL_MINUTES` | `30` | How often every subscription's feed is checked |
+| `QUICK_DOWNLOAD_HOURS` | `48` | How long a quick download's file stays before it is deleted |
 | `BACKLOG_LIMIT` | `500` | Max videos listed by *Load older videos* |
 | `YTDLP_PATH` | `yt-dlp` (`/opt/yt-dlp/bin/yt-dlp` in Docker) | yt-dlp used until Youtubaar installs its own copy in `DATA_DIR/yt-dlp` |
 | `YTDLP_AUTO_UPDATE_HOURS` | `24` | Hours between automatic yt-dlp updates, `0` to disable |
@@ -232,5 +238,9 @@ Everything the UI does is available over JSON:
 | POST | `/api/videos/actions` | `ids`, `action` (`download`/`ignore`/`restore`) |
 | POST | `/api/videos/delete` | `ids`: delete downloaded files, videos move to ignored |
 | GET | `/api/channels/:channelId/playlists` | a channel's playlists, with the ones followed |
+| GET | `/api/quick` | quick downloads, newest first |
+| POST | `/api/quick` | `url`, `kind` (`video`/`audio`), `quality` (`2160`/`1440`/`1080`/`720`/`480`) |
+| GET | `/api/quick/:id/file` | the file, as a download (supports resume) |
+| DELETE | `/api/quick/:id` | stops it if running, deletes the file |
 | GET | `/api/ytdlp` | installed and latest version |
 | POST | `/api/ytdlp/update` | installs the latest yt-dlp |

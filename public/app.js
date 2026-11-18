@@ -85,6 +85,7 @@ const state = {
   inboxChannel: '',
   limit: PAGE_SIZE,
   route: null,
+  quick: { url: '', kind: 'video', quality: '1080' },
 };
 
 /* ---------- DOM helpers ---------- */
@@ -822,6 +823,102 @@ pages.search = async (query) => {
   ];
 };
 
+/* ---------- Quick download ---------- */
+
+function fileSize(bytes) {
+  if (!bytes) return '';
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
+  return `${value.toFixed(unit >= 2 ? 1 : 0)} ${units[unit]}`;
+}
+
+function duration(seconds) {
+  if (!seconds) return '';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  const pad = (n) => String(n).padStart(2, '0');
+  return h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${m}:${pad(s)}`;
+}
+
+async function startQuickDownload(form) {
+  const { url, kind, quality } = state.quick;
+  if (!url.trim()) {
+    form.querySelector('input').focus();
+    return;
+  }
+  await api('/api/quick', { method: 'POST', body: { url: url.trim(), kind, quality } });
+  state.quick.url = '';
+  toast('Download started');
+  await render();
+}
+
+function quickItem(item) {
+  const title = item.title ?? item.url;
+  const facts = [item.channel, duration(item.duration), item.kind === 'audio' ? 'Audio M4A' : `${item.quality}p MP4`].filter(Boolean).join(' · ');
+  let status;
+  let actions = [];
+  if (item.status === 'downloading') {
+    status = progressBar(item);
+  } else if (item.status === 'ready') {
+    status = el('small', { class: 'muted', text: `${fileSize(item.size)} · deleted ${relativeTime(item.expiresAt)}` });
+    actions = [el('a', { class: 'button primary small', href: `/api/quick/${item.id}/file`, download: item.file ?? '' }, [icon('download'), el('span', { text: 'Save file' })])];
+  } else {
+    status = el('small', { class: 'error', text: item.error ?? 'Download failed' });
+    actions = [button('Try again', { icon: 'refresh', small: true, busy: async () => {
+      await api('/api/quick', { method: 'POST', body: { url: item.url, kind: item.kind, quality: item.quality } });
+      await api(`/api/quick/${item.id}`, { method: 'DELETE' });
+      await render();
+    } })];
+  }
+  const remove = iconButton('trash', item.status === 'downloading' ? 'Cancel and delete' : 'Delete now', async () => {
+    await api(`/api/quick/${item.id}`, { method: 'DELETE' });
+    await render();
+  });
+  return el('li', { class: 'quick-item' }, [
+    item.thumbnail ? el('img', { class: 'mini-thumb', src: item.thumbnail, alt: '', loading: 'lazy' }) : el('div', { class: 'mini-thumb' }),
+    el('div', { class: 'quick-body' }, [
+      el('a', { href: item.url, target: '_blank', rel: 'noopener', text: title }),
+      facts ? el('small', { class: 'muted', text: facts }) : null,
+      status,
+    ]),
+    el('div', { class: 'actions' }, [...actions, remove]),
+  ]);
+}
+
+pages.quick = async () => {
+  const items = await api('/api/quick');
+  const hours = state.status?.quickDownloadHours ?? 48;
+  const keep = hours % 24 === 0 ? plural(hours / 24, 'day') : plural(hours, 'hour');
+  const form = el('form', { class: 'quick-form panel', onsubmit: (event) => {
+    event.preventDefault();
+    const submit = event.currentTarget.querySelector('button[type=submit]');
+    withBusy(submit, () => startQuickDownload(event.currentTarget));
+  } });
+  const input = el('input', {
+    id: 'quick-url', type: 'url', placeholder: 'https://www.youtube.com/watch?v=...', autocomplete: 'off', required: true, value: state.quick.url,
+    'aria-label': 'Video link', oninput: (event) => { state.quick.url = event.target.value; },
+  });
+  const quality = state.quick.kind === 'audio' ? null : selectInput([['2160', '2160p'], ['1440', '1440p'], ['1080', '1080p'], ['720', '720p'], ['480', '480p']], state.quick.quality, (value) => { state.quick.quality = value; }, 'Quality');
+  form.append(
+    el('div', { class: 'lookup' }, [input, button('Download', { type: 'submit', icon: 'download', variant: 'primary' })]),
+    el('div', { class: 'toolbar' }, [
+      segmented([{ value: 'video', label: 'Video', icon: 'film' }, { value: 'audio', label: 'Audio only', icon: 'music' }], state.quick.kind, (value) => { state.quick.kind = value; render(); }),
+      quality,
+    ]),
+    el('p', { class: 'hint', text: `The file is ready to save from this page, then deleted after ${keep}. It does not go to your library or Jellyfin.` }),
+  );
+  return [
+    el('div', { class: 'page-head' }, [el('h1', { text: 'Quick download' }), el('p', { text: 'Download one video and save it from your browser' })]),
+    form,
+    items.length > 0
+      ? el('ul', { class: 'quick-list' }, items.map(quickItem))
+      : emptyState('No quick downloads', 'Paste a link above. The file shows up here when it is ready.'),
+  ];
+};
+
 /* ---------- Actions ---------- */
 
 async function checkAll() {
@@ -1283,6 +1380,7 @@ function renderNav() {
     item('#/activity/queue', 'activity', 'Activity', active('activity'), counts.failed, 'failed'),
     route.page === 'activity' ? el('a', { class: 'sub', href: '#/activity/queue', 'aria-current': route.arg !== 'history' ? 'page' : undefined, text: queued ? `Queue (${queued})` : 'Queue' }) : null,
     route.page === 'activity' ? el('a', { class: 'sub', href: '#/activity/history', 'aria-current': route.arg === 'history' ? 'page' : undefined, text: 'History' }) : null,
+    item('#/quick', 'bolt', 'Quick download', active('quick')),
     item('#/system', 'system', 'System', active('system')),
   ].filter(Boolean));
 
@@ -1374,7 +1472,9 @@ function init() {
 
   setInterval(() => {
     const onPlaylists = state.route.page === 'channel' && state.channelTab === 'playlists';
-    const busy = document.hidden || $('#dialog').open || onPlaylists || document.activeElement?.tagName === 'SELECT';
+    // Re-rendering replaces the page, so wait while a field on it is being used.
+    const editing = ['SELECT', 'INPUT'].includes(document.activeElement?.tagName) && $('#page').contains(document.activeElement);
+    const busy = document.hidden || $('#dialog').open || onPlaylists || document.activeElement?.tagName === 'SELECT' || editing;
     if (!busy) refresh();
   }, REFRESH_MS);
 }
