@@ -4,8 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { buildYtdlpArgs, tidyStem } from '../src/downloaders/ytdlp';
-import { airDate, episodeNfo, episodeNumber, isNewestFirst, kodiBaseName, placeEpisode, playlistEpisode, showNfo, type VideoMetadata } from '../src/jellyfin';
-import { fileSlug } from '../src/rules';
+import { airDate, episodeNfo, episodeNumber, isNewestFirst, episodeBaseName, placeEpisode, playlistEpisode, showNfo, type VideoMetadata } from '../src/jellyfin';
+import { fileTitle } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
 
 const subscription: Subscription = {
@@ -49,7 +49,7 @@ test('showNfo locks the show so Jellyfin does not match it against TV databases'
   assert.match(xml, /<lockdata>true<\/lockdata>/);
 });
 
-test('placeEpisode gives Kodi names, numbers episodes within a day, and is stable on rerun', async () => {
+test('placeEpisode names files "SxxEyy - Title", numbers episodes within a day, and is stable on rerun', async () => {
   const show = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-jf-'));
   const season = path.join(show, 'Season_2026');
   fs.mkdirSync(season);
@@ -61,14 +61,14 @@ test('placeEpisode gives Kodi names, numbers episodes within a day, and is stabl
 
   const placedFirst = await placeEpisode(first, show, meta, subscription);
   const placedSecond = await placeEpisode(second, show, { ...meta, id: 'BBBBBBBBBBB', title: 'Other one' }, subscription);
-  assert.equal(path.basename(placedFirst), 'Tom_Jerry_S2026E111701_Cats_vs_Dogs_more.mp4');
-  assert.equal(path.basename(placedSecond), 'Tom_Jerry_S2026E111702_Other_one.mp4');
+  assert.equal(path.basename(placedFirst), 'S2026E111701 - Cats vs Dogs & more.mp4');
+  assert.equal(path.basename(placedSecond), 'S2026E111702 - Other one.mp4');
   assert.deepEqual(fs.readdirSync(season).sort(), [
-    'Tom_Jerry_S2026E111701_Cats_vs_Dogs_more-thumb.jpg',
-    'Tom_Jerry_S2026E111701_Cats_vs_Dogs_more.mp4',
-    'Tom_Jerry_S2026E111701_Cats_vs_Dogs_more.nfo',
-    'Tom_Jerry_S2026E111702_Other_one.mp4',
-    'Tom_Jerry_S2026E111702_Other_one.nfo',
+    'S2026E111701 - Cats vs Dogs & more-thumb.jpg',
+    'S2026E111701 - Cats vs Dogs & more.mp4',
+    'S2026E111701 - Cats vs Dogs & more.nfo',
+    'S2026E111702 - Other one.mp4',
+    'S2026E111702 - Other one.nfo',
   ]);
   // Placing again (e.g. "Organize for Jellyfin" twice) changes nothing.
   assert.equal(await placeEpisode(placedFirst, show, meta, subscription), placedFirst);
@@ -81,15 +81,17 @@ test('placeEpisode moves an older download from the show root into its season', 
   const old = path.join(show, '2025-11-24_LE_MYSTERE_Y-QW67F2_Do.mp4');
   fs.writeFileSync(old, '');
   const placed = await placeEpisode(old, show, { id: 'Y-QW67F2_Do', title: 'LE MYSTÈRE DE LA PARTIE DE BRIDGE | The Séance (03)', upload_date: '20251124' }, { ...subscription, name: 'mistermv' });
-  assert.equal(path.relative(show, placed), path.join('Season_2025', 'mistermv_S2025E112401_LE_MYSTERE_DE_LA_PARTIE_DE_BRIDGE_The_Seance_03.mp4'));
+  assert.equal(path.relative(show, placed), path.join('Season_2025', 'S2025E112401 - LE MYSTÈRE DE LA PARTIE DE BRIDGE The Séance (03).mp4'));
   assert.ok(!fs.existsSync(old));
   fs.rmSync(show, { recursive: true, force: true });
 });
 
-test('kodiBaseName and fileSlug keep names short and plain', () => {
-  assert.equal(kodiBaseName('Zelda OoT', 1, 2, 'Bides & musiques (02)'), 'Zelda_OoT_S01E02_Bides_musiques_02');
-  assert.equal(fileSlug('Cool Down Your Room... With a FRIDGE?', 100), 'Cool_Down_Your_Room_With_a_FRIDGE');
-  assert.equal(fileSlug('one two three four five', 12), 'one_two');
+test('episodeBaseName and fileTitle keep titles readable and safe for any file system', () => {
+  assert.equal(episodeBaseName(1, 2, 'Bides & musiques (02)'), 'S01E02 - Bides & musiques (02)');
+  assert.equal(episodeBaseName(1, 2, ''), 'S01E02');
+  assert.equal(fileTitle('Cool Down Your Room... With a FRIDGE?', 100), 'Cool Down Your Room... With a FRIDGE');
+  assert.equal(fileTitle('AC/DC: "Live"  |  Paris', 100), 'AC DC Live Paris');
+  assert.equal(fileTitle('one two three four five', 12), 'one two');
 });
 
 test('buildYtdlpArgs puts Jellyfin downloads in year seasons with a thumbnail sidecar', () => {
@@ -119,7 +121,7 @@ test('a playlist is one season in playlist order', async () => {
   const media = path.join(show, 'Season_01', '2026-11-13_Part_3_AAAAAAAAAAA.mp4');
   fs.writeFileSync(media, '');
   const placed = await placeEpisode(media, show, meta, playlist, 3);
-  assert.equal(path.basename(placed), 'Zelda_OoT_S01E03_Cats_vs_Dogs_more.mp4');
+  assert.equal(path.basename(placed), 'S01E03 - Cats vs Dogs & more.mp4');
   const xml = fs.readFileSync(placed.replace('.mp4', '.nfo'), 'utf8');
   assert.match(xml, /<season>1<\/season>/);
   assert.match(xml, /<episode>3<\/episode>/);
@@ -170,11 +172,11 @@ test('placeEpisode renumbers an episode that was placed with the wrong number', 
   fs.writeFileSync(path.join(season, 'Blake_Manor_S01E11_Cats_vs_Dogs_more.nfo'), '<episode>11</episode>');
   fs.writeFileSync(path.join(season, 'Blake_Manor_S01E11_Cats_vs_Dogs_more-thumb.jpg'), '');
   const placed = await placeEpisode(media, show, meta, playlist, 5);
-  assert.equal(path.basename(placed), 'Blake_Manor_S01E05_Cats_vs_Dogs_more.webm');
+  assert.equal(path.basename(placed), 'S01E05 - Cats vs Dogs & more.webm');
   assert.deepEqual(fs.readdirSync(season).sort(), [
-    'Blake_Manor_S01E05_Cats_vs_Dogs_more-thumb.jpg',
-    'Blake_Manor_S01E05_Cats_vs_Dogs_more.nfo',
-    'Blake_Manor_S01E05_Cats_vs_Dogs_more.webm',
+    'S01E05 - Cats vs Dogs & more-thumb.jpg',
+    'S01E05 - Cats vs Dogs & more.nfo',
+    'S01E05 - Cats vs Dogs & more.webm',
   ]);
   assert.match(fs.readFileSync(placed.replace('.webm', '.nfo'), 'utf8'), /<episode>5<\/episode>/);
   fs.rmSync(show, { recursive: true, force: true });

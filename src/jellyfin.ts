@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { fileSlug } from './rules';
+import { fileTitle } from './rules';
 import type { PlaylistOrder, Subscription } from './types';
 
 /**
@@ -8,11 +8,11 @@ import type { PlaylistOrder, Subscription } from './types';
  * each video an episode with a Kodi-style .nfo next to it.
  *
  *   <folder>/tvshow.nfo, poster.jpg
- *   <folder>/Season_2026/Show_S2026E111701_Title.mp4
- *                        Show_S2026E111701_Title.nfo
- *                        Show_S2026E111701_Title-thumb.jpg
+ *   <folder>/Season_2026/S2026E111701 - Title.mp4
+ *                        S2026E111701 - Title.nfo
+ *                        S2026E111701 - Title-thumb.jpg
  *
- * Files follow Kodi's episode naming (Show_SxxEyy_Title), and the .nfo files give
+ * Files are named "SxxEyy - Title" (the show is the folder), and the .nfo files give
  * Jellyfin and Kodi titles, descriptions and air dates without querying TV databases.
  */
 
@@ -254,16 +254,16 @@ export async function planEpisode(showDir: string, meta: VideoMetadata, subscrip
 }
 
 /**
- * Kodi-style episode name without spaces or special characters:
- * "mistermv_S2026E112401_Le_mystere_de_la_partie_de_bridge" or "Zelda_OoT_S01E02_Bides_et_musiques".
+ * Episode file name without the show name (the show is the folder):
+ * "S2026E112401 - Le mystère de la partie de bridge" or "S01E02 - Bides & musiques".
  */
-export function kodiBaseName(showName: string, season: number, episode: number, title: string): string {
+export function episodeBaseName(season: number, episode: number, title: string): string {
   const pad = (value: number): string => String(value).padStart(2, '0');
-  return [fileSlug(showName, 60), `S${pad(season)}E${pad(episode)}`, fileSlug(title, 100)].filter((part) => part !== '').join('_');
+  return [`S${pad(season)}E${pad(episode)}`, fileTitle(title, 100)].filter((part) => part !== '').join(' - ');
 }
 
 /**
- * Puts a downloaded video in its Kodi place: season folder, Kodi name for the video,
+ * Puts a downloaded video in its Kodi place: season folder, episode name for the video,
  * its "-thumb.jpg" and its .nfo. Returns the video's new path.
  * episodeInPlaylist: the playlist episode number (see playlistEpisode); ignored for channels.
  * thumbnail: the image to use when none sits next to the file yet (e.g. older downloads).
@@ -282,7 +282,7 @@ export async function placeEpisode(
 
   const extension = path.extname(mediaPath);
   const oldStem = path.join(path.dirname(mediaPath), path.basename(mediaPath, extension));
-  const base = path.join(seasonDir, kodiBaseName(subscription.name, plan.season, plan.episode, meta.title ?? meta.id));
+  const base = path.join(seasonDir, episodeBaseName(plan.season, plan.episode, meta.title ?? meta.id));
   const target = `${base}${extension}`;
   if (target !== mediaPath) {
     await fs.rename(mediaPath, target);

@@ -98,15 +98,17 @@ upload year a season, each video an episode.
 <download folder>/<subscription folder>/
   tvshow.nfo, poster.jpg                                  show title, channel avatar
   Season_2026/
-    mistermv_S2026E111701_Episode_title.mp4               Kodi name: Show_SxxEyy_Title
-    mistermv_S2026E111701_Episode_title.nfo               title, description, air date, tags
-    mistermv_S2026E111701_Episode_title-thumb.jpg         episode image
+    S2026E111701 - Episode title.mp4                      episode name: SxxEyy - Title
+    S2026E111701 - Episode title.nfo                      title, description, air date, tags
+    S2026E111701 - Episode title-thumb.jpg                episode image
 ```
 
-Files use Kodi's episode naming (`Show_SxxEyy_Title`, no spaces or special characters),
-so Jellyfin and Kodi both recognize them even without the `.nfo` files. Videos
+Files are named `SxxEyy - Title` (the show is the folder, so its name is not repeated).
+The title keeps spaces and accents; only characters that file systems refuse
+(`/ \ : * ? " < > |`) are removed. Jellyfin and Kodi read the `SxxEyy` part, so they
+recognize episodes even without the `.nfo` files. Videos
 downloaded before you turned the option on: open the subscription and click
-**Organize for Jellyfin** to move them into their season with Kodi names, `.nfo`
+**Organize for Jellyfin** to move them into their season with episode names, `.nfo`
 files and thumbnails (metadata is read again from YouTube, nothing is re-downloaded).
 
 1. Mount the folder Jellyfin reads as Youtubaar's `/downloads`, e.g. on ZimaOS

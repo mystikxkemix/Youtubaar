@@ -93,17 +93,22 @@ export function normalizeFolder(folder: string): string {
 }
 
 /**
- * Like safeName, for one part of a file name: dots become "_" too, and long text is cut
- * at a word boundary ("Room... With" -> "Room_With").
+ * Readable title for a file name: keeps spaces, accents and punctuation, removes only
+ * what Windows, SMB shares or Linux refuse (/ \\ : * ? " < > | and control characters),
+ * and cuts long text at a word boundary.
  */
-export function fileSlug(text: string, maxLength: number): string {
-  let slug = safeName(text).replace(/\.+/g, '_').replace(/_+/g, '_').replace(/^[_-]+|[_-]+$/g, '');
-  if (slug.length > maxLength) {
-    const cut = slug.slice(0, maxLength);
-    const boundary = cut.lastIndexOf('_');
-    slug = (boundary > maxLength / 2 ? cut.slice(0, boundary) : cut).replace(/[_-]+$/g, '');
+export function fileTitle(text: string, maxLength: number): string {
+  let title = text
+    .replace(/[\u0000-\u001f\u007f/\\:*?"<>|]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (title.length > maxLength) {
+    const cut = title.slice(0, maxLength);
+    const boundary = cut.lastIndexOf(' ');
+    title = boundary > maxLength / 2 ? cut.slice(0, boundary) : cut;
   }
-  return slug;
+  // Windows refuses names ending in a dot or a space.
+  return title.replace(/[. ]+$/g, '').replace(/^[. -]+/g, '');
 }
 
 /** Folder name derived from a channel or playlist title. */

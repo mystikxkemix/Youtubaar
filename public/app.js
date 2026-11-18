@@ -490,7 +490,7 @@ pages.channel = async (id) => {
     subscription.jellyfin && (counts.done ?? 0) > 0 ? button('Organize for Jellyfin', {
       icon: 'folder',
       small: true,
-      title: 'Move downloaded videos into season folders with Kodi names, .nfo files and thumbnails',
+      title: 'Move downloaded videos into season folders with episode names, .nfo files and thumbnails',
       busy: async () => {
         toast('Organizing downloads for Jellyfin…');
         const { organized, failed } = await api(`/api/subscriptions/${id}/organize`, { method: 'POST' });

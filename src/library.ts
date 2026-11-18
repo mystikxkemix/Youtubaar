@@ -339,7 +339,7 @@ export class Library {
 
   /**
    * Brings videos already downloaded for a subscription into the Jellyfin layout: season
-   * folder, Kodi name, .nfo and thumbnail. Metadata is read again from YouTube (no
+   * folder, episode name, .nfo and thumbnail. Metadata is read again from YouTube (no
    * re-download). Safe to run twice: placed videos keep their name and number.
    */
   async organizeForJellyfin(id: string): Promise<{ organized: number; failed: string[] }> {
