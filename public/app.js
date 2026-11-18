@@ -217,6 +217,30 @@ async function videoAction(ids, action) {
   await refresh();
 }
 
+/** Asks first: deleting removes the files from disk. */
+function confirmDeleteDownloads(videos) {
+  const ids = videos.map((video) => video.id);
+  const form = el('form', {
+    onsubmit: async (event) => {
+      event.preventDefault();
+      try {
+        const { deleted, failed } = await api('/api/videos/delete', { method: 'POST', body: { ids } });
+        closeDialog();
+        toast(failed.length > 0 ? `Deleted ${plural(deleted, 'video')}; failed: ${failed.join('; ')}` : `Deleted ${plural(deleted, 'video')}`, failed.length > 0);
+        for (const id of ids) state.selected.delete(id);
+        await refresh();
+      } catch (deleteError) {
+        toast(deleteError.message, true);
+      }
+    },
+  }, [
+    el('div', { class: 'head' }, [el('h2', { text: videos.length === 1 ? `Delete "${videos[0].title}"?` : `Delete ${plural(videos.length, 'downloaded video')}?` })]),
+    el('p', { style: { margin: 0, color: 'var(--text-2)' }, text: 'The video files are removed from disk, with their Jellyfin .nfo and thumbnail. The videos move to Ignored, so they are not downloaded again; "Download" brings one back.' }),
+    el('div', { class: 'foot' }, [button('Cancel', { onclick: closeDialog }), button('Delete', { type: 'submit', variant: 'primary', icon: 'trash' })]),
+  ]);
+  showDialog(form);
+}
+
 function subscriptionById(id) {
   return state.subscriptions.find((subscription) => subscription.id === id) ?? null;
 }
@@ -308,12 +332,20 @@ function videoActions(video, compact) {
     case 'ignored': return [make('restore', 'Move back to new', 'restore'), make('download', 'Download', 'download', 'go')];
     case 'failed': return [make('refresh', 'Retry', 'download', 'go'), make('ignore', 'Ignore', 'ignore')];
     case 'queued': return [make('x', 'Cancel', 'ignore')];
+    case 'done': return !canDeleteFiles() ? [] : [compact
+      ? iconButton('trash', 'Delete file', () => confirmDeleteDownloads([video]))
+      : button('Delete file', { icon: 'trash', small: true, variant: 'ghost', onclick: () => confirmDeleteDownloads([video]) })];
     default: return [];
   }
 }
 
 function isSelectable(video) {
-  return video.status !== 'downloading' && video.status !== 'done';
+  return video.status !== 'downloading' && (video.status !== 'done' || canDeleteFiles());
+}
+
+/** MeTube keeps its own files, so Youtubaar can delete only what yt-dlp downloaded. */
+function canDeleteFiles() {
+  return state.status?.downloader !== 'MeTube';
 }
 
 function toggleSelected(id) {
@@ -332,6 +364,7 @@ function selectionBar(videos) {
     has('available', 'ignored', 'failed') ? button('Download', { icon: 'download', small: true, variant: 'primary', busy: () => videoAction(ids, 'download') }) : null,
     has('available', 'failed', 'queued') ? button('Ignore', { icon: 'ignore', small: true, busy: () => videoAction(ids, 'ignore') }) : null,
     has('ignored') ? button('Move back to new', { icon: 'restore', small: true, busy: () => videoAction(ids, 'restore') }) : null,
+    has('done') ? button('Delete files', { icon: 'trash', small: true, onclick: () => confirmDeleteDownloads(selected.filter((video) => video.status === 'done')) }) : null,
     button('Clear', { small: true, onclick: () => { state.selected.clear(); render(); } }),
   ]);
 }

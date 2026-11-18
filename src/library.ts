@@ -63,6 +63,32 @@ const ACTION_SOURCES: Record<VideoAction, readonly VideoStatus[]> = {
   restore: ['ignored'],
 };
 
+/**
+ * Removes a downloaded video and the files saved next to it: the Jellyfin .nfo and
+ * "-thumb.jpg", and the thumbnail yt-dlp leaves with the same name. Refuses paths outside
+ * the download folder. Returns how many files were removed; a missing file is not an error.
+ */
+export async function deleteDownloadFiles(downloadDir: string, filename: string): Promise<number> {
+  const root = path.resolve(downloadDir);
+  const media = path.resolve(root, filename);
+  if (!media.startsWith(`${root}${path.sep}`)) {
+    throw new Error(`"${filename}" is outside the download folder`);
+  }
+  const stem = media.slice(0, media.length - path.extname(media).length);
+  let removed = 0;
+  for (const file of [media, `${stem}.nfo`, `${stem}-thumb.jpg`, `${stem}.jpg`, `${stem}.webp`]) {
+    try {
+      await fs.promises.rm(file);
+      removed++;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
+        throw error;
+      }
+    }
+  }
+  return removed;
+}
+
 /** How newly seen entries are classified. */
 type IngestPolicy = 'follow-mode' | InitialAction;
 
@@ -349,6 +375,42 @@ export class Library {
     }
     this.store.save();
     return { organized, failed };
+  }
+
+  /**
+   * Deletes downloaded videos from disk and marks them ignored, so an auto-download
+   * subscription does not grab them again ("Move back to new" or "Download" brings one back).
+   * Videos not downloaded are left alone. Returns how many were deleted.
+   */
+  async deleteDownloads(ids: string[]): Promise<{ deleted: number; failed: string[] }> {
+    if (this.config.downloader !== 'ytdlp') {
+      throw new Error('Deleting needs the built-in yt-dlp downloader (MeTube keeps its own files)');
+    }
+    let deleted = 0;
+    const failed: string[] = [];
+    for (const id of ids) {
+      const video = this.store.data.videos[id];
+      if (video === undefined || video.status !== 'done') {
+        continue;
+      }
+      try {
+        if (video.filename !== null) {
+          await deleteDownloadFiles(this.config.downloadDir, video.filename);
+        }
+        video.status = 'ignored';
+        video.note = null;
+        video.progress = null;
+        video.filename = null;
+        video.updatedAt = now();
+        deleted++;
+      } catch (error) {
+        failed.push(`${video.title}: ${(error as Error).message}`);
+      }
+    }
+    if (deleted > 0) {
+      this.store.save();
+    }
+    return { deleted, failed };
   }
 
   /** Lists the source's older videos (beyond the feed's latest 15) into the inbox. Needs yt-dlp. */

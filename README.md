@@ -44,6 +44,9 @@ YouTube RSS feeds ──poll──▶ Youtubaar ──"download this"──▶ y
 - **Jellyfin**: optional per-subscription show layout with `.nfo` metadata, thumbnails
   and posters, ready for a Jellyfin *Shows* library (see below).
 - **Download tracking**: progress, final file name, failure reason, retry.
+- **Delete downloads**: remove a downloaded video's file (and its Jellyfin .nfo and
+  thumbnail) from its row or from a selection. It moves to *Ignored*, so it is not
+  downloaded again. Needs the built-in yt-dlp downloader.
 
 ## Run with Docker
 
@@ -224,6 +227,7 @@ Everything the UI does is available over JSON:
 | POST | `/api/check` | checks every subscription |
 | GET | `/api/videos` | `status` (comma list), `subscription`, `q`, `limit`, `offset` |
 | POST | `/api/videos/actions` | `ids`, `action` (`download`/`ignore`/`restore`) |
+| POST | `/api/videos/delete` | `ids`: delete downloaded files, videos move to ignored |
 | GET | `/api/channels/:channelId/playlists` | a channel's playlists, with the ones followed |
 | GET | `/api/ytdlp` | installed and latest version |
 | POST | `/api/ytdlp/update` | installs the latest yt-dlp |

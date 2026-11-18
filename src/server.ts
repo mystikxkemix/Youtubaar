@@ -172,6 +172,14 @@ export function createServer(config: Config, library: Library, downloaderName: s
     }),
   );
 
+  route('POST', '/api/videos/delete', async ({ body }) => {
+    const { ids } = body as { ids?: unknown };
+    if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
+      throw new HttpError(400, '"ids" must be a list of video ids');
+    }
+    return library.deleteDownloads(ids as string[]);
+  });
+
   route('POST', '/api/videos/actions', ({ body }) => {
     const { ids, action } = body as { ids?: unknown; action?: VideoAction };
     if (!Array.isArray(ids) || ids.some((id) => typeof id !== 'string')) {
