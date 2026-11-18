@@ -1,6 +1,6 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { ensureShowMetadata, PLAYLIST_SEASON_FOLDER, placeEpisode, SEASON_FOLDER, type VideoMetadata } from '../jellyfin';
+import { ensureShowMetadata, INCOMING_FOLDER, placeEpisode, prepareIncoming, type VideoMetadata } from '../jellyfin';
 import { lastError, run } from '../process';
 import type { Video } from '../types';
 import type { DownloadJob, Downloader, UpdateCallback } from './types';
@@ -78,15 +78,14 @@ export function buildYtdlpArgs(job: DownloadJob, downloadDir: string, extraArgs:
     }
   }
   if (usesJellyfin(job)) {
-    // Downloaded into its season under a temporary name with a "-thumb.jpg", plus the
-    // metadata the .nfo is written from; placeEpisode then gives it its Kodi name.
-    // Channels: one season per upload year. Playlists: one season, in playlist order.
-    const ordered = subscription.kind === 'playlist' && Boolean(job.episode);
-    const seasonDir = path.join(downloadDir, subscription.folder, ordered ? PLAYLIST_SEASON_FOLDER : SEASON_FOLDER);
+    // Downloaded into the show's hidden incoming folder under a temporary name with a
+    // "-thumb.jpg", plus the metadata the .nfo is written from; placeEpisode then moves
+    // it into its season with its episode name. Jellyfin never sees the temporary files.
+    const incomingDir = path.join(downloadDir, subscription.folder, INCOMING_FOLDER);
     args.push(
-      '-o', path.join(seasonDir, OUTPUT_TEMPLATE),
+      '-o', path.join(incomingDir, OUTPUT_TEMPLATE),
       '--write-thumbnail', '--convert-thumbnails', 'jpg',
-      '-o', `thumbnail:${path.join(seasonDir, OUTPUT_TEMPLATE.replace('.%(ext)s', '-thumb.%(ext)s'))}`,
+      '-o', `thumbnail:${path.join(incomingDir, OUTPUT_TEMPLATE.replace('.%(ext)s', '-thumb.%(ext)s'))}`,
       '--print', `after_move:${META_MARKER}%(.{id,title,description,upload_date,timestamp,duration,channel,uploader,webpage_url,tags})j`,
     );
   } else {
@@ -219,6 +218,9 @@ export class YtdlpDownloader implements Downloader {
     let lastReport = 0;
     let lastPercent = -1;
     this.onUpdate(videoId, { status: 'downloading', progress: 0 });
+    if (usesJellyfin(job)) {
+      await prepareIncoming(path.join(this.downloadDir, job.subscription.folder));
+    }
 
     const result = await run(this.ytdlpPath(), buildYtdlpArgs(job, this.downloadDir, this.extraArgs), {
       onLine: (line) => {

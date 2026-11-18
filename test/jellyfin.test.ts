@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { buildYtdlpArgs, tidyStem } from '../src/downloaders/ytdlp';
-import { airDate, episodeNfo, episodeNumber, isNewestFirst, episodeBaseName, placeEpisode, playlistEpisode, showNfo, type VideoMetadata } from '../src/jellyfin';
+import { airDate, episodeNfo, episodeNumber, isNewestFirst, episodeBaseName, placeEpisode, playlistEpisode, prepareIncoming, showNfo, type VideoMetadata } from '../src/jellyfin';
 import { fileTitle } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
 
@@ -94,11 +94,11 @@ test('episodeBaseName and fileTitle keep titles readable and safe for any file s
   assert.equal(fileTitle('one two three four five', 12), 'one two');
 });
 
-test('buildYtdlpArgs puts Jellyfin downloads in year seasons with a thumbnail sidecar', () => {
+test('buildYtdlpArgs puts Jellyfin downloads in the hidden incoming folder with a thumbnail sidecar', () => {
   const args = buildYtdlpArgs({ video, subscription }, '/downloads', []);
   const outputs = args.flatMap((arg, index) => (args[index - 1] === '-o' ? [arg] : []));
-  assert.equal(outputs[0], '/downloads/YouTube/Tom_Jerry/Season_%(upload_date>%Y)s/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s');
-  assert.equal(outputs[1], 'thumbnail:/downloads/YouTube/Tom_Jerry/Season_%(upload_date>%Y)s/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s-thumb.%(ext)s');
+  assert.equal(outputs[0], '/downloads/YouTube/Tom_Jerry/.incoming/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s');
+  assert.equal(outputs[1], 'thumbnail:/downloads/YouTube/Tom_Jerry/.incoming/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s-thumb.%(ext)s');
   assert.ok(args.includes('--restrict-filenames'));
   assert.ok(args.includes('--write-thumbnail'));
 
@@ -114,14 +114,17 @@ test('tidyStem leaves only letters, digits, underscores and dashes', () => {
 test('a playlist is one season in playlist order', async () => {
   const playlist: Subscription = { ...subscription, kind: 'playlist', sourceId: 'PLxyz1234567890abcd', name: 'Zelda OoT', folder: 'mistermv_Zelda_OoT' };
   const args = buildYtdlpArgs({ video: { ...video, position: 3 }, subscription: playlist, episode: 3 }, '/downloads', []);
-  assert.ok(args.includes('/downloads/mistermv_Zelda_OoT/Season_01/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s'));
+  assert.ok(args.includes('/downloads/mistermv_Zelda_OoT/.incoming/%(upload_date>%Y-%m-%d)s_%(title)s_%(id)s.%(ext)s'));
 
   const show = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-pl-'));
-  fs.mkdirSync(path.join(show, 'Season_01'));
-  const media = path.join(show, 'Season_01', '2026-11-13_Part_3_AAAAAAAAAAA.mp4');
+  const incoming = await prepareIncoming(show);
+  assert.ok(fs.existsSync(path.join(incoming, '.ignore')));
+  const media = path.join(incoming, '2026-11-13_Part_3_AAAAAAAAAAA.mp4');
   fs.writeFileSync(media, '');
+  fs.writeFileSync(path.join(incoming, '2026-11-13_Part_3_AAAAAAAAAAA-thumb.jpg'), '');
   const placed = await placeEpisode(media, show, meta, playlist, 3);
-  assert.equal(path.basename(placed), 'S01E03 - Cats vs Dogs & more.mp4');
+  assert.equal(path.relative(show, placed), path.join('Season_01', 'S01E03 - Cats vs Dogs & more.mp4'));
+  assert.deepEqual(fs.readdirSync(incoming), ['.ignore']);
   const xml = fs.readFileSync(placed.replace('.mp4', '.nfo'), 'utf8');
   assert.match(xml, /<season>1<\/season>/);
   assert.match(xml, /<episode>3<\/episode>/);

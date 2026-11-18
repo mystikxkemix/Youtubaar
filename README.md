@@ -97,6 +97,7 @@ upload year a season, each video an episode.
 ```
 <download folder>/<subscription folder>/
   tvshow.nfo, poster.jpg                                  show title, channel avatar
+  .incoming/                                              downloads in progress, hidden from Jellyfin
   Season_2026/
     S2026E111701 - Episode title.mp4                      episode name: SxxEyy - Title
     S2026E111701 - Episode title.nfo                      title, description, air date, tags

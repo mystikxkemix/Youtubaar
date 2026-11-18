@@ -8,6 +8,7 @@ import type { PlaylistOrder, Subscription } from './types';
  * each video an episode with a Kodi-style .nfo next to it.
  *
  *   <folder>/tvshow.nfo, poster.jpg
+ *   <folder>/.incoming/                    downloads in progress (hidden from Jellyfin)
  *   <folder>/Season_2026/S2026E111701 - Title.mp4
  *                        S2026E111701 - Title.nfo
  *                        S2026E111701 - Title-thumb.jpg
@@ -30,7 +31,12 @@ export interface VideoMetadata {
   tags?: string[] | null;
 }
 
-export const SEASON_FOLDER = 'Season_%(upload_date>%Y)s';
+/**
+ * Where yt-dlp writes a download before placeEpisode moves it into its season.
+ * Hidden, and marked with a ".ignore" file, so Jellyfin never shows partial files
+ * or the temporary yt-dlp names.
+ */
+export const INCOMING_FOLDER = '.incoming';
 /** Playlists are a single season in playlist order. */
 export const PLAYLIST_SEASON_FOLDER = 'Season_01';
 
@@ -128,6 +134,17 @@ export async function ensureShowMetadata(showDir: string, subscription: Subscrip
       // No poster: Jellyfin falls back to an episode thumbnail.
     }
   }
+}
+
+/** Creates the show's incoming folder with the ".ignore" file Jellyfin skips folders on. */
+export async function prepareIncoming(showDir: string): Promise<string> {
+  const incoming = path.join(showDir, INCOMING_FOLDER);
+  await fs.mkdir(incoming, { recursive: true });
+  const ignore = path.join(incoming, '.ignore');
+  if (!(await exists(ignore))) {
+    await fs.writeFile(ignore, '');
+  }
+  return incoming;
 }
 
 /** Season and episode of an .nfo already in a season folder. */
