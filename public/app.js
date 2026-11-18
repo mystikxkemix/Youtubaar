@@ -499,6 +499,15 @@ pages.channel = async (id) => {
         await refresh();
       },
     }) : null,
+    subscription.jellyfin && state.status?.jellyfin?.configured ? button('Refresh in Jellyfin', {
+      icon: 'refresh',
+      small: true,
+      title: 'Ask Jellyfin to read the titles, numbers and descriptions of this show again',
+      busy: async () => {
+        await api('/api/jellyfin/refresh', { method: 'POST', body: { subscription: id } });
+        toast('Jellyfin is refreshing this show');
+      },
+    }) : null,
     button('Edit', { icon: 'edit', small: true, onclick: () => openEditDialog(subscription) }),
     button('Delete', { icon: 'trash', small: true, variant: 'danger', onclick: () => confirmDelete(subscription) }),
   ]);
@@ -796,6 +805,7 @@ pages.system = async () => {
         ]),
         el('div', { class: 'actions' }, [button('Check all now', { icon: 'refresh', busy: checkAll })]),
       ]),
+      jellyfinPanel(status.jellyfin),
       el('section', { class: 'panel' }, [
         el('h2', { text: 'Library' }),
         el('dl', {}, [
@@ -810,6 +820,27 @@ pages.system = async () => {
     ]),
   ];
 };
+
+function jellyfinPanel(jellyfin) {
+  if (!jellyfin?.configured) {
+    return el('section', { class: 'panel' }, [
+      el('h2', { text: 'Jellyfin' }),
+      el('p', { class: 'note', text: 'Not connected. Set JELLYFIN_URL and JELLYFIN_API_KEY so new episodes get their titles and numbers in Jellyfin right away.' }),
+    ]);
+  }
+  let note;
+  if (jellyfin.lastError) note = el('p', { class: 'note bad', text: jellyfin.lastError });
+  else if (jellyfin.lastRefreshAt) note = el('p', { class: 'note good', text: 'Working.' });
+  else note = el('p', { class: 'note', text: 'Shows are refreshed about 90 seconds after new episodes are placed.' });
+  return el('section', { class: 'panel' }, [
+    el('h2', { text: 'Jellyfin' }),
+    note,
+    el('dl', {}, [
+      el('dt', { text: 'Server' }), el('dd', { class: 'muted', text: jellyfin.url }),
+      el('dt', { text: 'Last refresh' }), el('dd', { text: jellyfin.lastRefreshAt ? `${jellyfin.lastRefreshed}, ${relativeTime(jellyfin.lastRefreshAt)}` : 'Not since this start' }),
+    ]),
+  ]);
+}
 
 pages.search = async (query) => {
   const { items, total } = await api(`/api/videos?q=${encodeURIComponent(query)}&limit=${state.limit}`);

@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { Config } from './config';
 import { NotFoundError, type Library, type SubscriptionInput, type VideoAction } from './library';
+import type { JellyfinRefresher } from './jellyfinServer';
 import type { QuickDownloads, QuickInput } from './quick';
 import { VIDEO_STATUSES, type VideoStatus } from './types';
 import type { YtdlpStatus } from './ytdlpManager';
@@ -150,7 +151,7 @@ function serveStatic(config: Config, pathname: string, response: http.ServerResp
   fs.createReadStream(file).pipe(response);
 }
 
-export function createServer(config: Config, library: Library, quick: QuickDownloads, downloaderName: string, ytdlp: YtdlpControl): http.Server {
+export function createServer(config: Config, library: Library, quick: QuickDownloads, jellyfin: JellyfinRefresher, downloaderName: string, ytdlp: YtdlpControl): http.Server {
   const routes: Route[] = [];
   const route = (method: string, pattern: string, handler: Handler): void => {
     routes.push({ method, pattern: new RegExp(`^${pattern}$`), handler });
@@ -161,6 +162,7 @@ export function createServer(config: Config, library: Library, quick: QuickDownl
     downloader: downloaderName,
     pollIntervalMinutes: config.pollIntervalMinutes,
     quickDownloadHours: config.quickDownloadHours,
+    jellyfin: jellyfin.status(),
     lastPollAt: library.lastPoll,
     nextPollAt: library.nextPollAt,
     checking: library.isChecking,
@@ -235,6 +237,19 @@ export function createServer(config: Config, library: Library, quick: QuickDownl
       throw new HttpError(400, '"ids" must be a list of video ids');
     }
     return { changed: library.applyAction(ids as string[], action as VideoAction) };
+  });
+
+  route('POST', '/api/jellyfin/refresh', async ({ body }) => {
+    if (!jellyfin.configured) {
+      throw new HttpError(409, 'Set JELLYFIN_URL and JELLYFIN_API_KEY to refresh Jellyfin');
+    }
+    const subscription = library.getSubscription(String((body as { subscription?: unknown }).subscription ?? ''));
+    await jellyfin.refreshShow(subscription.name);
+    const status = jellyfin.status();
+    if (status.lastError !== null) {
+      throw new HttpError(502, status.lastError);
+    }
+    return status;
   });
 
   route('GET', '/api/quick', () => quick.list());

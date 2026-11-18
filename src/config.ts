@@ -28,6 +28,9 @@ export interface Config {
   quickDownloadHours: number;
   /** Max number of videos fetched when loading a source's full history. */
   backlogLimit: number;
+  /** Jellyfin base URL and API key; when both are set, shows are refreshed after new episodes. */
+  jellyfinUrl: string;
+  jellyfinApiKey: string;
   authUser: string;
   authPassword: string;
 }
@@ -76,6 +79,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pollIntervalMinutes: intEnv(env, 'POLL_INTERVAL_MINUTES', 30, 1),
     quickDownloadHours: intEnv(env, 'QUICK_DOWNLOAD_HOURS', 48, 1),
     backlogLimit: intEnv(env, 'BACKLOG_LIMIT', 500, 1),
+    jellyfinUrl: (env.JELLYFIN_URL ?? '').trim().replace(/\/+$/, ''),
+    jellyfinApiKey: (env.JELLYFIN_API_KEY ?? '').trim(),
     authUser: env.AUTH_USER ?? 'admin',
     authPassword: env.AUTH_PASSWORD ?? '',
   };

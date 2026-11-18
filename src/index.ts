@@ -2,6 +2,7 @@ import { loadConfig } from './config';
 import { MeTubeDownloader } from './downloaders/metube';
 import type { Downloader } from './downloaders/types';
 import { YtdlpDownloader } from './downloaders/ytdlp';
+import { JellyfinRefresher } from './jellyfinServer';
 import { Library } from './library';
 import { QuickDownloads } from './quick';
 import { createServer, type YtdlpControl } from './server';
@@ -13,6 +14,8 @@ const FIRST_POLL_DELAY_MS = 5_000;
 const FIRST_UPDATE_DELAY_MS = 20_000;
 const BUSY_RETRY_MS = 15 * 60_000;
 const QUICK_CLEANUP_MS = 10 * 60_000;
+/** Jellyfin's monitor waits 60 s after a file change before adding it. */
+const JELLYFIN_REFRESH_DELAY_MS = 90_000;
 
 function log(message: string): void {
   console.log(`${new Date().toISOString()} ${message}`);
@@ -41,6 +44,8 @@ function main(): void {
     library.requeueInterrupted();
   }
   library.setDownloader(downloader);
+  const jellyfin = new JellyfinRefresher(config.jellyfinUrl, config.jellyfinApiKey, JELLYFIN_REFRESH_DELAY_MS, log);
+  library.onEpisodesPlaced = (showName) => jellyfin.episodesPlaced(showName);
 
   // Quick downloads always use the local yt-dlp, whatever downloads the library.
   const quick = new QuickDownloads(config.dataDir, config.downloadDir, () => ytdlp.path, config.ytdlpExtraArgs, config.quickDownloadHours, log);
@@ -109,7 +114,7 @@ function main(): void {
   }, SYNC_INTERVAL_MS);
   library.processQueue();
 
-  const server = createServer(config, library, quick, downloader.name, ytdlpControl);
+  const server = createServer(config, library, quick, jellyfin, downloader.name, ytdlpControl);
   server.listen(config.port, () => {
     log(`Youtubaar ${config.version} listening on :${config.port}, downloader ${downloader.name}, polling every ${config.pollIntervalMinutes} min`);
     if (config.authPassword === '') {

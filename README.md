@@ -117,6 +117,13 @@ downloaded before you turned the option on: open the subscription and click
 **Organize for Jellyfin** to move them into their season with episode names, `.nfo`
 files and thumbnails (metadata is read again from YouTube, nothing is re-downloaded).
 
+Jellyfin's real-time monitor adds new episodes by itself, but it does not read an
+`.nfo` again when it changes later (for example after **Organize for Jellyfin**): the
+episode then keeps its file name as title and has no number. Set `JELLYFIN_URL` and
+`JELLYFIN_API_KEY` and Youtubaar asks Jellyfin to refresh the show after new episodes
+are placed; a show page also gets a **Refresh in Jellyfin** button. Without them, use
+Jellyfin's *Refresh metadata > Replace all metadata* on the show.
+
 1. Mount the folder Jellyfin reads as Youtubaar's `/downloads`, e.g. on ZimaOS
    `- /DATA/Media/YouTube:/downloads`, with the same folder in Jellyfin's container.
 2. In Jellyfin, add a library of type **Shows** on that folder. Keep the **Nfo**
@@ -182,6 +189,8 @@ npm test
 | `METUBE_URL` | (only for `metube`) | MeTube base URL, including its `URL_PREFIX` if set |
 | `DOWNLOAD_DIR` | `./downloads` (`/downloads` in Docker) | Download root for the `ytdlp` downloader |
 | `POLL_INTERVAL_MINUTES` | `30` | How often every subscription's feed is checked |
+| `JELLYFIN_URL` | | Jellyfin address seen from Youtubaar, e.g. `http://192.168.1.10:8096` |
+| `JELLYFIN_API_KEY` | | Jellyfin API key (Dashboard > API Keys). With `JELLYFIN_URL`, a show is refreshed in Jellyfin 90 s after new episodes are placed |
 | `QUICK_DOWNLOAD_HOURS` | `48` | How long a quick download's file stays before it is deleted |
 | `BACKLOG_LIMIT` | `500` | Max videos listed by *Load older videos* |
 | `YTDLP_PATH` | `yt-dlp` (`/opt/yt-dlp/bin/yt-dlp` in Docker) | yt-dlp used until Youtubaar installs its own copy in `DATA_DIR/yt-dlp` |
@@ -238,6 +247,7 @@ Everything the UI does is available over JSON:
 | POST | `/api/videos/actions` | `ids`, `action` (`download`/`ignore`/`restore`) |
 | POST | `/api/videos/delete` | `ids`: delete downloaded files, videos move to ignored |
 | GET | `/api/channels/:channelId/playlists` | a channel's playlists, with the ones followed |
+| POST | `/api/jellyfin/refresh` | `subscription`: refresh that show in Jellyfin now |
 | GET | `/api/quick` | quick downloads, newest first |
 | POST | `/api/quick` | `url`, `kind` (`video`/`audio`), `quality` (`2160`/`1440`/`1080`/`720`/`480`) |
 | GET | `/api/quick/:id/file` | the file, as a download (supports resume) |

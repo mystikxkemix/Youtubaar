@@ -127,6 +127,9 @@ export class Library {
     private downloader: Downloader | null = null,
   ) {}
 
+  /** Called with the show name each time episodes are placed in the Jellyfin layout. */
+  onEpisodesPlaced: (showName: string) => void = () => undefined;
+
   /** Stops handing new downloads to the downloader, e.g. while yt-dlp is being replaced. */
   paused = false;
 
@@ -374,6 +377,9 @@ export class Library {
       }
     }
     this.store.save();
+    if (organized > 0) {
+      this.onEpisodesPlaced(subscription.name);
+    }
     return { organized, failed };
   }
 
@@ -605,6 +611,12 @@ export class Library {
     }
     video.updatedAt = now();
     this.store.save();
+    if (update.status === 'done') {
+      const subscription = this.subscriptions.find((candidate) => candidate.id === video.subscriptionId);
+      if (subscription?.jellyfin === true && subscription.downloadType === 'video' && this.config.downloader === 'ytdlp') {
+        this.onEpisodesPlaced(subscription.name);
+      }
+    }
     if (update.status !== 'downloading') {
       this.processQueue();
     }
