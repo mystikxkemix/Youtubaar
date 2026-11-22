@@ -8,7 +8,7 @@ COPY test ./test
 RUN npm run build
 
 FROM node:22-alpine
-# Version shown in the UI, e.g. 1.13 (set by CI; "dev" for local builds).
+# Version shown in the UI, e.g. 2.13 (set by CI; "dev" for local builds).
 ARG VERSION=dev
 # yt-dlp: resolves @handles, lists channel history, and downloads.
 # The copy baked in here is only a starting point: Youtubaar installs and updates its
