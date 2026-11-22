@@ -64,8 +64,8 @@ Then open `http://<host>:8085`. Videos land in `./downloads/<subscription folder
 ## Install on ZimaOS
 
 CI publishes the public image `ghcr.io/mystikxkemix/youtubaar` (linux/amd64) after the
-tests pass on `master`, tagged `latest`, `1.<number of commits on master>` (e.g. `1.10`)
-and `sha-<commit>`. Pin a `1.N` tag: updating is then just changing the number.
+tests pass on `master`, tagged `latest`, `2.<number of merges/pushes on master>` (e.g. `2.20`)
+and `sha-<commit>`. Pin a `2.N` tag: updating is then just changing the number.
 
 1. ZimaOS App Store → **+** (custom install) → **Import**, paste:
    ```yaml
@@ -86,7 +86,7 @@ and `sha-<commit>`. Pin a `1.N` tag: updating is then just changing the number.
          - /DATA/Media/YouTube:/downloads    # one folder per subscription (Jellyfin: same folder)
    ```
 2. Open `http://<zima-ip>:8085`.
-3. Update later: in ZimaOS, open the app's settings, set the new `1.N` tag on the image
+3. Update later: in ZimaOS, open the app's settings, set the new `2.N` tag on the image
    and save. ZimaOS pulls it and restarts the app. yt-dlp itself updates without this
    (see below).
 
