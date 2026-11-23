@@ -523,8 +523,8 @@ pages.channel = async (id) => {
           el('span', { class: 'fact' }, [icon(subscription.downloadType === 'audio' ? 'music' : 'film'), qualityText(subscription)]),
           subscription.jellyfin ? el('span', { class: 'fact', title: 'Saved as a Jellyfin show with .nfo metadata' }, [icon('library'), 'Jellyfin metadata']) : null,
           el('span', { class: 'fact' }, [icon('folder'), subscription.folder || 'Download root']),
-          subscription.titleInclude || subscription.titleExclude || subscription.skipShorts
-            ? el('span', { class: 'fact' }, [icon('filter'), [subscription.titleInclude && `Only "${subscription.titleInclude}"`, subscription.titleExclude && `Not "${subscription.titleExclude}"`, subscription.skipShorts && 'No Shorts'].filter(Boolean).join(', ')])
+          subscription.titleInclude || subscription.titleExclude || subscription.skipShorts || subscription.includePrivate
+            ? el('span', { class: 'fact' }, [icon('filter'), [subscription.titleInclude && `Only "${subscription.titleInclude}"`, subscription.titleExclude && `Not "${subscription.titleExclude}"`, subscription.skipShorts && 'No Shorts', subscription.includePrivate && 'Keeps private videos'].filter(Boolean).join(', ')])
             : null,
           subscription.kind === 'playlist' && subscription.ownerName ? ownerFact(subscription) : null,
           !subscription.enabled ? el('span', { class: 'fact' }, [icon('pause'), 'Paused']) : null,
@@ -1016,11 +1016,12 @@ function settingsFields(initial, options = {}) {
   const include = el('input', { name: 'titleInclude', value: initial.titleInclude ?? '', placeholder: 'e.g. tutorial|review', autocomplete: 'off' });
   const exclude = el('input', { name: 'titleExclude', value: initial.titleExclude ?? '', placeholder: 'e.g. live|trailer', autocomplete: 'off' });
   const skipShorts = el('input', { type: 'checkbox', checked: initial.skipShorts ?? false });
+  const includePrivate = el('input', { type: 'checkbox', checked: initial.includePrivate ?? false });
   const initialSelect = options.withInitial
     ? selectInput([['available', 'Show them as new'], ['ignore', 'Ignore them'], ['download', 'Download them']], 'available', () => {}, 'Existing videos')
     : null;
   if (initialSelect) initialSelect.classList.remove('select');
-  const hasFilters = Boolean(initial.titleInclude || initial.titleExclude || initial.skipShorts);
+  const hasFilters = Boolean(initial.titleInclude || initial.titleExclude || initial.skipShorts || initial.includePrivate);
   // Playlists only: which end is episode 1 in the Jellyfin layout.
   const orderSelect = initial.kind === 'playlist'
     ? selectInput([['auto', 'Automatic (from upload dates)'], ['oldest-first', 'Oldest video first'], ['newest-first', 'Newest video first']], initial.playlistOrder ?? 'auto', () => {}, 'Playlist order')
@@ -1046,6 +1047,7 @@ function settingsFields(initial, options = {}) {
           el('label', { class: 'field' }, [el('span', { text: 'Title must not match' }), exclude]),
         ]),
         el('label', { class: 'toggle' }, [skipShorts, 'Skip Shorts']),
+        el('label', { class: 'toggle', title: 'Off: private videos are ignored, then picked up once public.' }, [includePrivate, 'Keep private videos']),
       ]),
     ]),
   ]);
@@ -1059,6 +1061,7 @@ function settingsFields(initial, options = {}) {
     titleInclude: include.value,
     titleExclude: exclude.value,
     skipShorts: skipShorts.checked,
+    includePrivate: includePrivate.checked,
     jellyfin: jellyfinInput.checked,
     ...(orderSelect ? { playlistOrder: orderSelect.value } : {}),
     ...(initialSelect ? { initial: initialSelect.value } : {}),
@@ -1203,6 +1206,7 @@ function playlistContext(subscription) {
       titleInclude: subscription.titleInclude,
       titleExclude: subscription.titleExclude,
       skipShorts: subscription.skipShorts,
+      includePrivate: subscription.includePrivate ?? false,
       jellyfin: subscription.jellyfin ?? false,
       initial: 'available',
     },

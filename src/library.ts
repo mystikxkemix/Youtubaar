@@ -4,7 +4,7 @@ import path from 'node:path';
 import type { Config } from './config';
 import type { Downloader, DownloadUpdate } from './downloaders/types';
 import { ensureShowMetadata, placeEpisode, playlistEpisode, type VideoMetadata } from './jellyfin';
-import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from './rules';
+import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions, waitsForPublic } from './rules';
 import type { Store } from './store';
 import { PLAYLIST_ORDERS, type DownloadType, type InitialAction, type Mode, type PlaylistOrder, type Subscription, type Video, type VideoStatus } from './types';
 import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, fetchVideoMetadata, isMissingTitle, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
@@ -20,6 +20,7 @@ export interface SubscriptionInput {
   titleInclude?: string;
   titleExclude?: string;
   skipShorts?: boolean;
+  includePrivate?: boolean;
   jellyfin?: boolean;
   playlistOrder?: PlaylistOrder;
   enabled?: boolean;
@@ -111,6 +112,17 @@ export function refreshVideoInfo(video: Video, entry: FeedEntry): boolean {
     video.updatedAt = now();
   }
   return changed;
+}
+
+/** Status of a video entering a subscription, from the ingest policy and the filter result. */
+function statusFor(subscription: Subscription, policy: IngestPolicy, reason: string | null): VideoStatus {
+  if (reason !== null || policy === 'ignore') {
+    return 'ignored';
+  }
+  if (policy === 'download' || (policy === 'follow-mode' && subscription.mode === 'auto')) {
+    return 'queued';
+  }
+  return 'available';
 }
 
 export interface VideoQuery {
@@ -262,6 +274,7 @@ export class Library {
       titleInclude: input.titleInclude ?? '',
       titleExclude: input.titleExclude ?? '',
       skipShorts: input.skipShorts ?? false,
+      includePrivate: input.includePrivate ?? false,
       jellyfin: input.jellyfin ?? false,
       playlistOrder: input.playlistOrder ?? 'auto',
       enabled: input.enabled ?? true,
@@ -292,6 +305,7 @@ export class Library {
       titleInclude: input.titleInclude ?? current.titleInclude,
       titleExclude: input.titleExclude ?? current.titleExclude,
       skipShorts: input.skipShorts ?? current.skipShorts,
+      includePrivate: input.includePrivate ?? current.includePrivate ?? false,
       jellyfin: input.jellyfin ?? current.jellyfin ?? false,
       playlistOrder: input.playlistOrder ?? current.playlistOrder ?? 'auto',
       enabled: input.enabled ?? current.enabled,
@@ -743,6 +757,14 @@ export class Library {
         const autoDownloads = policy === 'follow-mode' && subscription.mode === 'auto' && subscription.enabled;
         if (existing.subscriptionId === subscription.id) {
           existing.position = entry.position ?? existing.position ?? null;
+          // Private when first seen and public now: handle it like a video seen for the first time.
+          if (waitsForPublic(existing) && !isMissingTitle(entry.title, entry.videoId)) {
+            const reason = filterReason(subscription, entry);
+            existing.status = statusFor(subscription, policy, reason);
+            existing.note = reason;
+            existing.progress = null;
+            existing.updatedAt = now();
+          }
         } else if (this.canClaim(existing, subscription, entry, autoDownloads)) {
           existing.subscriptionId = subscription.id;
           existing.position = entry.position ?? null;
@@ -753,14 +775,7 @@ export class Library {
         continue;
       }
       const reason = filterReason(subscription, entry);
-      let status: VideoStatus;
-      if (reason !== null || policy === 'ignore') {
-        status = 'ignored';
-      } else if (policy === 'download' || (policy === 'follow-mode' && subscription.mode === 'auto')) {
-        status = 'queued';
-      } else {
-        status = 'available';
-      }
+      const status = statusFor(subscription, policy, reason);
       videos[entry.videoId] = {
         id: entry.videoId,
         subscriptionId: subscription.id,

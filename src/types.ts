@@ -52,6 +52,8 @@ export interface Subscription extends DownloadOptions {
   titleInclude: string;
   titleExclude: string;
   skipShorts: boolean;
+  /** Keep videos listed without a title (private when listed); by default they are ignored until public. */
+  includePrivate?: boolean;
   /** Save as a Jellyfin show: season folders, .nfo files and thumbnails (yt-dlp downloader). */
   jellyfin?: boolean;
   /** Playlists: which end of the playlist is episode 1 (undefined = auto). */
