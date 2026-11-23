@@ -7,7 +7,7 @@ import { ensureShowMetadata, placeEpisode, playlistEpisode, type VideoMetadata }
 import { compileTitleFilter, filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from './rules';
 import type { Store } from './store';
 import { PLAYLIST_ORDERS, type DownloadType, type InitialAction, type Mode, type PlaylistOrder, type Subscription, type Video, type VideoStatus } from './types';
-import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, fetchVideoMetadata, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
+import { fetchAvatar, fetchBacklog, fetchChannelPlaylists, fetchFeed, fetchVideoMetadata, isMissingTitle, mergeListing, resolveSource, sourceUrl, type ChannelPlaylist, type FeedEntry, type SourceRef } from './youtube';
 
 export interface SubscriptionInput {
   url?: string;
@@ -91,6 +91,27 @@ export async function deleteDownloadFiles(downloadDir: string, filename: string)
 
 /** How newly seen entries are classified. */
 type IngestPolicy = 'follow-mode' | InitialAction;
+
+/**
+ * Fills in what a known video was first seen without, from a newer listing: its title
+ * and date are missing when it was private at the time. Real titles are never replaced.
+ * Returns true when something changed.
+ */
+export function refreshVideoInfo(video: Video, entry: FeedEntry): boolean {
+  let changed = false;
+  if (isMissingTitle(video.title, video.id) && !isMissingTitle(entry.title, entry.videoId)) {
+    video.title = entry.title;
+    changed = true;
+  }
+  if (video.publishedAt === null && entry.publishedAt !== null) {
+    video.publishedAt = entry.publishedAt;
+    changed = true;
+  }
+  if (changed) {
+    video.updatedAt = now();
+  }
+  return changed;
+}
 
 export interface VideoQuery {
   statuses?: VideoStatus[];
@@ -718,6 +739,7 @@ export class Library {
     for (const entry of entries) {
       const existing = videos[entry.videoId];
       if (existing !== undefined) {
+        refreshVideoInfo(existing, entry);
         const autoDownloads = policy === 'follow-mode' && subscription.mode === 'auto' && subscription.enabled;
         if (existing.subscriptionId === subscription.id) {
           existing.position = entry.position ?? existing.position ?? null;

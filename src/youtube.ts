@@ -68,6 +68,18 @@ export function videoIdFromUrl(url: string): string | null {
   return match ? match[1] : null;
 }
 
+/** Titles yt-dlp lists for videos it cannot see. */
+const PLACEHOLDER_TITLES = new Set(['[Private video]', '[Deleted video]', '[Unavailable video]']);
+
+/**
+ * True when a title is not a real one: empty, the bare video id (what we store when
+ * YouTube gave none) or a yt-dlp placeholder. Happens for videos private when first seen.
+ */
+export function isMissingTitle(title: string, videoId: string): boolean {
+  const text = title.trim();
+  return text === '' || text === videoId || PLACEHOLDER_TITLES.has(text);
+}
+
 const XML_ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
 
 export function decodeXml(text: string): string {
