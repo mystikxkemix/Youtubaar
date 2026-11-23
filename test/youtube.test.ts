@@ -8,7 +8,7 @@ import { Store } from '../src/store';
 import { test } from 'node:test';
 import { indexHistory } from '../src/downloaders/metube';
 import { buildYtdlpArgs, ProgressTracker } from '../src/downloaders/ytdlp';
-import { filterReason, folderFromName, normalizeFolder, validateDownloadOptions } from '../src/rules';
+import { filterReason, folderFromName, normalizeFolder, PRIVATE_NOTE, validateDownloadOptions, waitsForPublic } from '../src/rules';
 import type { Subscription, Video } from '../src/types';
 import { mergeListing, parseFeed, parseSourceInput, videoIdFromUrl } from '../src/youtube';
 import { isNewer } from '../src/ytdlpManager';
@@ -247,4 +247,52 @@ test('mergeListing keeps listing positions and the feed dates', () => {
   );
   assert.equal(merged[1].publishedAt, '2026-11-16');
   assert.equal(merged[1].position, 2);
+});
+
+test('filterReason ignores private videos unless the subscription keeps them', () => {
+  const privateEntry = { videoId: 'abcdefghijk', title: 'abcdefghijk', channel: 'C', url: '', thumbnail: '', publishedAt: null, isShort: false };
+  assert.equal(filterReason(subscription(), privateEntry), PRIVATE_NOTE);
+  assert.equal(filterReason(subscription(), { ...privateEntry, title: '[Private video]' }), PRIVATE_NOTE);
+  assert.equal(filterReason(subscription({ includePrivate: true }), privateEntry), null);
+  assert.equal(filterReason(subscription(), { ...privateEntry, title: 'Episode 7' }), null);
+});
+
+test('waitsForPublic spots videos held back because they were private', () => {
+  const base = { note: null } as unknown as Video;
+  assert.equal(waitsForPublic({ ...base, status: 'ignored', note: PRIVATE_NOTE }), true);
+  assert.equal(waitsForPublic({ ...base, status: 'failed', note: '[youtube] abc: Private video. If the owner...' }), true);
+  assert.equal(waitsForPublic({ ...base, status: 'ignored', note: null }), false);
+  assert.equal(waitsForPublic({ ...base, status: 'ignored', note: 'Short' }), false);
+  assert.equal(waitsForPublic({ ...base, status: 'failed', note: 'HTTP Error 403' }), false);
+  assert.equal(waitsForPublic({ ...base, status: 'done', note: null }), false);
+});
+
+test('a private video is ignored, then picked up once it is public', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'youtubaar-test-'));
+  const store = Store.open(dir);
+  const playlist = subscription({ id: 'playlist', kind: 'playlist', sourceId: 'PLxyz1234567890abcd', mode: 'auto' });
+  store.data.subscriptions.push(playlist);
+  store.data.videos = {
+    FFFFFFFFFFF: video({ id: 'FFFFFFFFFFF', subscriptionId: 'playlist', status: 'failed', note: 'ERROR: [youtube] FFFFFFFFFFF: Private video' }),
+  };
+  const library = new Library(store, loadConfig({ DATA_DIR: dir }), () => 'yt-dlp');
+  const entry = (id: string, title: string) => ({ videoId: id, title, channel: 'C', url: `https://www.youtube.com/watch?v=${id}`, thumbnail: '', publishedAt: null, isShort: false });
+  const ingest = (library as unknown as { ingest: (s: Subscription, e: unknown[], p: string) => number }).ingest.bind(library);
+
+  ingest(playlist, [entry('PPPPPPPPPPP', 'PPPPPPPPPPP')], 'follow-mode');
+  assert.equal(store.data.videos.PPPPPPPPPPP.status, 'ignored');
+  assert.equal(store.data.videos.PPPPPPPPPPP.note, PRIVATE_NOTE);
+
+  ingest(playlist, [entry('PPPPPPPPPPP', 'Episode 7'), entry('FFFFFFFFFFF', 'Episode 6')], 'follow-mode');
+  assert.equal(store.data.videos.PPPPPPPPPPP.title, 'Episode 7');
+  assert.equal(store.data.videos.PPPPPPPPPPP.status, 'queued');
+  assert.equal(store.data.videos.PPPPPPPPPPP.note, null);
+  assert.equal(store.data.videos.FFFFFFFFFFF.status, 'queued', 'a download that failed as private is retried');
+
+  // Opt-in: the playlist keeps private videos.
+  const keep = subscription({ id: 'keep', kind: 'playlist', sourceId: 'PLkeep1234567890abc', mode: 'auto', includePrivate: true, folder: 'Keep' });
+  store.data.subscriptions.push(keep);
+  ingest(keep, [entry('KKKKKKKKKKK', 'KKKKKKKKKKK')], 'follow-mode');
+  assert.equal(store.data.videos.KKKKKKKKKKK.status, 'queued');
+  fs.rmSync(dir, { recursive: true, force: true });
 });

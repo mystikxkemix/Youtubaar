@@ -1,5 +1,5 @@
-import type { DownloadOptions, Subscription } from './types';
-import type { FeedEntry } from './youtube';
+import type { DownloadOptions, Subscription, Video } from './types';
+import { isMissingTitle, type FeedEntry } from './youtube';
 
 /** Accepted values, mirroring MeTube's format catalog so both downloaders take the same settings. */
 export const VIDEO_FORMATS = ['any', 'mp4'];
@@ -17,8 +17,25 @@ export function compileTitleFilter(pattern: string): RegExp | null {
   }
 }
 
+/** Note on videos ignored because YouTube listed them without a title (private, or not out yet). */
+export const PRIVATE_NOTE = 'Private video';
+
+/**
+ * True when a video waits for YouTube to make it public: ignored as private, or a
+ * download that failed because the video was private.
+ */
+export function waitsForPublic(video: Video): boolean {
+  if (video.status === 'ignored') {
+    return video.note === PRIVATE_NOTE;
+  }
+  return video.status === 'failed' && /private video/i.test(video.note ?? '');
+}
+
 /** Why a new entry should be skipped, or null to keep it. */
 export function filterReason(subscription: Subscription, entry: FeedEntry): string | null {
+  if (subscription.includePrivate !== true && isMissingTitle(entry.title, entry.videoId)) {
+    return PRIVATE_NOTE;
+  }
   if (subscription.skipShorts && entry.isShort) {
     return 'Short';
   }
